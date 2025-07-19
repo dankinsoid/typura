@@ -1,6 +1,7 @@
 # IDE
 .lsp/
 .clj-kondo/.cache/
+.calva/
 
 # Build artifacts
 target/

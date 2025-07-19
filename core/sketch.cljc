@@ -27,16 +27,16 @@
   IFn
   (-invoke [_ value] value))
 
-(def Address (Schema
-              {:id :string
-               :tags [:set :keyword]
-               :address
-               {:street :string
-                :city :string
-                :zip :int
-                :lonlat [:tuple :double :double]}}))
+(def Address
+  {:id :string
+   :tags [:set :keyword]
+   :address
+   {:street :string
+    :city :string
+    :zip :int
+    :lonlat [:tuple :double :double]}})
 
-(Address
+(->Address
  {:id "123"
   :tags #{:home :work}
   :address {:street "123 Main St"
@@ -44,7 +44,12 @@
             :zip 12345
             :lonlat [123.456 789.012]}})
 
-(as Address {:id "123" :tags #{:home :work} :address {:street "123 Main St" :city "Anytown" :zip 12345 :lonlat [123.456 789.012]}})
+(as Address {:id "123" 
+             :tags #{:home :work} 
+             :address {:street "123 Main St" 
+                       :city "Anytown" 
+                       :zip 12345 
+                       :lonlat [123.456 789.012]}})
 
 (defschema Array [Element]
   [:vector Element])

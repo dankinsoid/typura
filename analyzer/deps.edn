@@ -1,5 +1,5 @@
 {:paths ["src"]
- :deps {metosin/malli {:mvn/version "0.16.1"}
+ :deps {metosin/malli {:mvn/version "0.19.1"}
         typura/core {:local/root "../core"}}
  :aliases
  {:test {:extra-paths ["test"]

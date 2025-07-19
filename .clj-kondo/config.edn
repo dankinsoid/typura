@@ -1,0 +1,1 @@
+{:hooks {:analyze-call {typura.core/defschema hooks.typura/defschema}}}

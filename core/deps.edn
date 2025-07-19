@@ -1,5 +1,5 @@
 {:paths ["src"]
- :deps {metosin/malli {:mvn/version "0.16.1"}}
+ :deps {metosin/malli {:mvn/version "0.19.1"}}
  :aliases
  {:dev {:extra-paths ["dev"]
         :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}}}
