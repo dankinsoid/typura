@@ -1,7 +1,12 @@
-{:paths ["src"]
- :deps {metosin/malli {:mvn/version "0.16.1"}}
+{:paths []
+ :deps {}
  :aliases
- {:dev {:extra-paths ["dev"]
+ {:core {:replace-deps {typura/core {:local/root "core"}}
+         :replace-paths ["core/src"]}
+  :analyzer {:replace-deps {typura/core {:local/root "core"}
+                            typura/analyzer {:local/root "analyzer"}}
+             :replace-paths ["analyzer/src"]}
+  :dev {:extra-paths ["dev"]
         :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}}}
   :test {:extra-paths ["test"]
          :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}}
