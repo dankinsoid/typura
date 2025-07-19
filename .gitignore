@@ -1,0 +1,21 @@
+# IDE
+.lsp/
+.clj-kondo/.cache/
+
+# Build artifacts
+target/
+classes/
+.cpcache/
+pom.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor backups
+*~
+*.swp
+*.swo
+
+# Logs
+*.log
