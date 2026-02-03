@@ -2,27 +2,6 @@
   (:require [malli.core :as m]
             [malli.registry :as mr]))
 
-(deftype SchemaWrapper [schema]
-  m/Schema
-  (-validator [_] (m/-validator schema))
-  (-explainer [_ path] (m/-explainer schema path))
-  (-parser [_] (m/-parser schema))
-  (-unparser [_] (m/-unparser schema))
-  (-transformer [_ transformer method options]
-    (m/-transformer schema transformer method options))
-  (-walk [_ walker path options] (m/-walk schema walker path options))
-  (-properties [_] (m/-properties schema))
-  (-options [_] (m/-options schema))
-  (-children [_] (m/-children schema))
-  (-parent [_] (m/-parent schema))
-  (-form [_] (m/-form schema))
-  
-  clojure.lang.IFn
-  (invoke [_ x] x))
-
-(defn schema-wrapper [schema]
-  (SchemaWrapper. (m/schema schema)))
-
 ;; Core library for type definitions and utilities
 (defmacro defschema
   ([name args schema]
@@ -43,7 +22,9 @@
     (throw (ex-info "Value does not conform to schema" {:schema schema :value value}))))
 
 (defschema Fixed-Vector [size Item]
-  (into [:tuple] (repeat size Item)))
+  [:vector
+   {:min size :max size}
+   Item])
 
 (defschema Matrix [Item size0 & rest-sizes]
   [:vector
@@ -52,14 +33,54 @@
      (apply Matrix Item rest-sizes)
      Item)])
 
-(defschema User 
-  [:map 
+;; (defn some-fn
+;;   {:types [T]
+;;    :where (extends? Object T)}
+  
+;;   [object T
+;;    :_ currency :keyword := :USD
+;;    :count number :int := 0
+;;    :tuple [first second] [:tuple :string :string]
+;;    & rest :any]
+;;   object)
+
+;; (defn hmhm [number :int #(-> (or 4) (min (max 4)))
+;;             name :string :or 3
+;;             [first second] :vector :or [0 1]]
+;;   count)
+
+(-> nil (or 3))
+
+(defn parse-args [args]
+  (if (seq args)
+    (cond
+      (symbol? (first args)) []
+      (keyword? (first args)) []
+      :else (throw (ex-info "Invalid argument type" {:args args})))
+    []))
+
+;; (defn hmhm [[count :int]
+;;             [name :string]]
+;;   count)
+
+;; (hmm :count 10 :name "example")
+
+;; (defn convert
+;;   [:_ amount :number
+;;    :_ from-currency :keyword
+;;    :to to-currency :keyword]
+;;   object)
+
+;; (convert 20 :USD :to :EUR)
+
+(defschema User
+  [:map
    [:id :string]
    [:name :string]
    [:email :string]
    [:age :int]
    [:location [:tuple :double :double]]])
 
+(is? (Matrix :int 3 3) [[0 0 7] [0 0 0] [0 0 0]])
 
-(defn test []
-  (m/validate User [123.456 789.012]))
+(macroexpand-1 '(defn eee {:doc "doc"} [hm] hm))
