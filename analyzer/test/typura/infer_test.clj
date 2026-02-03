@@ -65,3 +65,30 @@
     (is (= :number (:type (sut/analyze-form '(inc 1))))))
   (testing "dec"
     (is (= :number (:type (sut/analyze-form '(dec 1)))))))
+
+;; --- Phase 1: Flow Analysis ---
+
+(deftest guard-narrowing
+  (testing "int? narrows to :int in then-branch"
+    (is (= :number
+           (:type (sut/analyze-form
+                   '(let [x 1]
+                      (if (int? x) (+ x 1) 0)))))))
+  (testing "string? narrows to :string in then-branch"
+    (is (= :string
+           (:type (sut/analyze-form
+                   '(let [x "hello"]
+                      (if (string? x) (str x " world") ""))))))))
+
+(deftest predicate-return-type
+  (testing "int? returns boolean"
+    (is (= :boolean (:type (sut/analyze-form '(int? 42))))))
+  (testing "string? returns boolean"
+    (is (= :boolean (:type (sut/analyze-form '(string? "x")))))))
+
+(deftest union-normalization
+  (testing "same branch types produce single type, not union"
+    (is (= :int (:type (sut/analyze-form '(if true 1 2))))))
+  (testing "different branch types produce union"
+    (is (= [:or :int :string]
+           (:type (sut/analyze-form '(if true 1 "x")))))))

@@ -1,7 +1,23 @@
 (ns typura.infer
   (:require [typura.types :as t]
             [typura.context :as ctx]
-            [typura.stubs :as stubs]))
+            [typura.stubs :as stubs]
+            [typura.subtype :as sub]))
+
+(defn- simplify-union
+  "Subtype-aware union normalization: remove members subsumed by others."
+  [t]
+  (let [t (t/normalize-union t)]
+    (if-not (t/union-type? t)
+      t
+      (let [members (vec (rest t))
+            keep (reduce (fn [acc m]
+                           (if (some #(and (not= % m) (sub/subtype? m %)) members)
+                             acc
+                             (conj acc m)))
+                         []
+                         members)]
+        (t/normalize-union (into [:or] keep))))))
 
 (defmulti infer-node
   "Infer the type of an AST node. Returns [type, updated-ctx]."
@@ -75,15 +91,57 @@
 
 ;; --- Conditionals ---
 
+(defn- extract-guard-info
+  "If test node is (pred? x), return {:sym local-symbol :narrows type} or nil."
+  [test-node]
+  (when (= :invoke (:op test-node))
+    (let [fn-node (:fn test-node)
+          args (:args test-node)]
+      (when (and (= :var (:op fn-node))
+                 (= 1 (count args))
+                 (= :local (:op (first args))))
+        (let [var-sym (-> fn-node :var symbol)
+              guard (stubs/lookup-guard var-sym)]
+          (when (and guard (= 0 (:arg guard)))
+            {:sym (:name (first args))
+             :narrows (:narrows guard)}))))))
+
+(defn- extract-test-local
+  "If test node is a simple local reference, return its symbol."
+  [test-node]
+  (when (= :local (:op test-node))
+    (:name test-node)))
+
 (defmethod infer-node :if [node ctx]
-  (let [[_ ctx'] (infer-node (:test node) ctx)
-        [then-type ctx''] (infer-node (:then node) ctx')
-        [else-type ctx'''] (if (:else node)
-                             (infer-node (:else node) ctx'')
-                             [:nil ctx''])]
-    (if (= then-type else-type)
-      [then-type ctx''']
-      [[:or then-type else-type] ctx'''])))
+  (let [test-node (:test node)
+        [_ ctx'] (infer-node test-node ctx)
+        guard (extract-guard-info test-node)
+        test-local (extract-test-local test-node)
+        ;; Build narrowed contexts for then/else branches
+        then-ctx (cond
+                   ;; Guard predicate: narrow to guard type in then-branch
+                   guard
+                   (ctx/extend-binding ctx' (:sym guard) (:narrows guard))
+                   ;; Truthiness: remove nil from local's type in then-branch
+                   test-local
+                   (let [orig (or (ctx/lookup-binding ctx' test-local) :any)]
+                     (ctx/extend-binding ctx' test-local (t/remove-falsy orig)))
+                   :else ctx')
+        else-ctx (cond
+                   ;; Guard predicate: subtract guard type in else-branch
+                   guard
+                   (let [orig (or (ctx/lookup-binding ctx' (:sym guard)) :any)]
+                     (ctx/extend-binding ctx' (:sym guard)
+                                         (t/subtract-type orig (:narrows guard))))
+                   :else ctx')
+        [then-type _] (infer-node (:then node) then-ctx)
+        [else-type _] (if (:else node)
+                         (infer-node (:else node) else-ctx)
+                         [:nil else-ctx])
+        result-type (if (= then-type else-type)
+                      then-type
+                      (simplify-union [:or then-type else-type]))]
+    [result-type ctx']))
 
 ;; --- Function invocation ---
 

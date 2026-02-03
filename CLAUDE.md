@@ -162,66 +162,68 @@ cd analyzer && clj -M:dev
 
 ## Development Roadmap
 
-### Phase 0 — Foundation (MVP)
+### Phase 0 — Foundation (MVP) ✅
 Focus: infrastructure, architecture, tests, fast feedback loop.
 
-1. **Subtype checking** — core validation primitive (`subtype? :int :number` → true)
-   - Primitive hierarchy (`:int` ⊂ `:number`, etc.)
-   - Union subtyping (`:int` ⊂ `[:or :int :string]`)
-   - Map structural subtyping (`[:map [:a :int] [:b :string]]` ⊂ `[:map [:a :int]]`)
-   - `:any` as top type (everything is subtype of `:any`)
-2. **Type context** data structure with scoping
-3. **AST walker** — multimethod on `:op` (`:const`, `:local`, `:let`, `:if`, `:do`, `:invoke`, `:fn`, `:def`, `:static-call`, `:instance-call`)
-4. **Minimal core stubs** — ~15 functions (`+`, `-`, `*`, `/`, `str`, `count`, `conj`, `assoc`, `get`, `first`, `rest`, `nth`, `inc`, `dec`, `println`)
-5. **REPL-driven testing** — analyze expression → see inferred types instantly
-6. **Basic test suite**
-7. **Result**: can analyze `(defn add [a b] (+ a b))` → `{:args [:number :number] :return :number}`
+- [x] **Subtype checking** — core validation primitive (`subtype? :int :number` → true)
+  - [x] Primitive hierarchy (`:int` ⊂ `:number`, etc.)
+  - [x] Union subtyping (`:int` ⊂ `[:or :int :string]`)
+  - [x] Map structural subtyping (`[:map [:a :int] [:b :string]]` ⊂ `[:map [:a :int]]`)
+  - [x] `:any` as top type (everything is subtype of `:any`)
+- [x] **Type context** data structure with scoping
+- [x] **AST walker** — multimethod on `:op` (`:const`, `:local`, `:let`, `:if`, `:do`, `:invoke`, `:fn`, `:def`, `:static-call`, `:instance-call`)
+- [x] **Minimal core stubs** — ~15 functions (`+`, `-`, `*`, `/`, `str`, `count`, `conj`, `assoc`, `get`, `first`, `rest`, `nth`, `inc`, `dec`, `println`)
+- [x] **REPL-driven testing** — analyze expression → see inferred types instantly
+- [x] **Basic test suite**
+- [x] **Result**: can analyze `(defn add [a b] (+ a b))` → `{:args [:number :number] :return :number}`
 
-### Phase 1 — Flow Analysis
-1. Type narrowing in `if` branches via predicate table
-2. Truthiness narrowing (remove nil/false from unions)
-3. Union type support in inference
+### Phase 1 — Flow Analysis (in progress)
+- [x] Type narrowing in `if` branches via guard predicates (`int?`, `string?`, etc.)
+- [x] Truthiness narrowing (remove nil from unions in then-branch)
+- [x] Union type normalization (dedup, subtype simplification)
+- [ ] Type subtraction in else-branch (subtract guard type from unions)
+- [ ] Nested guard narrowing (guards inside `let`, `do`, etc.)
 
 ### Phase 2 — Stub System
-1. Stub file format (EDN with Malli schemas)
-2. Stub loading by namespace (user > built-in priority)
-3. Expand core stubs to ~50 most-used functions
-4. Schema constructors for generics
+- [ ] Stub file format (EDN with Malli schemas)
+- [ ] Stub loading by namespace (user > built-in priority)
+- [ ] Expand core stubs to ~50 most-used functions
+- [ ] Schema constructors for generics
 
 ### Phase 3 — Hook System
-1. SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
-2. Hook loading from `.typura/hooks/`
-3. Tag-based rule filtering
-4. Built-in core hook (replaces/supplements stubs)
+- [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
+- [ ] Hook loading from `.typura/hooks/`
+- [ ] Tag-based rule filtering
+- [ ] Built-in core hook (replaces/supplements stubs)
 
 ### Phase 4 — Protocols, Records, Multimethods
-1. Protocol definitions → method signatures in context
-2. Protocol/interface satisfaction checking in subtype layer
-3. Record definitions → typed map schemas
-4. Multimethod dispatch tracking and coverage warnings
+- [ ] Protocol definitions → method signatures in context
+- [ ] Protocol/interface satisfaction checking in subtype layer
+- [ ] Record definitions → typed map schemas
+- [ ] Multimethod dispatch tracking and coverage warnings
 
 ### Phase 5 — Clojure Core Abstractions & Interop
 Model Clojure's core interfaces/protocols as capabilities that `subtype?` understands:
-1. Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
-   - Maps, vectors, sets, keywords satisfy different subsets of these
-   - Usage-based inference: `(x 5)` → x is `IFn`, `(:key x)` → x has key `:key`, `(nth x 0)` → x is `Indexed`
-2. Java interop types — rely on reflection info from tools.analyzer.jvm (not hardcoded hierarchy)
-   - Instance method return types, constructor types
-   - Class→type mapping from AST `:tag` metadata
-3. Platform-agnostic capability model — same abstractions work on JVM (interfaces) and CLJS (protocols)
+- [ ] Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
+  - Maps, vectors, sets, keywords satisfy different subsets of these
+  - Usage-based inference: `(x 5)` → x is `IFn`, `(:key x)` → x has key `:key`, `(nth x 0)` → x is `Indexed`
+- [ ] Java interop types — rely on reflection info from tools.analyzer.jvm (not hardcoded hierarchy)
+  - Instance method return types, constructor types
+  - Class→type mapping from AST `:tag` metadata
+- [ ] Platform-agnostic capability model — same abstractions work on JVM (interfaces) and CLJS (protocols)
 
 ### Phase 6 — ClojureScript Support
-1. Abstract analyzer interface — decouple from tools.analyzer.jvm
-2. tools.analyzer.js backend for CLJS
-3. Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
-4. Shared core logic, platform-specific stubs
-5. Conditional reader tags for platform-aware stubs (`.cljc`)
+- [ ] Abstract analyzer interface — decouple from tools.analyzer.jvm
+- [ ] tools.analyzer.js backend for CLJS
+- [ ] Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
+- [ ] Shared core logic, platform-specific stubs
+- [ ] Conditional reader tags for platform-aware stubs (`.cljc`)
 
 ### Phase 7 — LSP + CLI
-1. CLI: `clj -M:typura check src/`
-2. LSP server for real-time editor feedback
-3. Output formats: human-readable + EDN/JSON
-4. Incremental analysis with file-level caching
+- [ ] CLI: `clj -M:typura check src/`
+- [ ] LSP server for real-time editor feedback
+- [ ] Output formats: human-readable + EDN/JSON
+- [ ] Incremental analysis with file-level caching
 
 ### Open Questions
 - Recursive types (trees, linked lists) — Malli `:ref` + inference?

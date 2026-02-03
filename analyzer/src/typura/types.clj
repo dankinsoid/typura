@@ -55,6 +55,57 @@
     (symbol? val)                  :symbol
     :else                          :any))
 
+(defn normalize-union
+  "Flatten nested :or, deduplicate members, unwrap singletons."
+  [t]
+  (if-not (union-type? t)
+    t
+    (let [members (->> (rest t)
+                       (mapcat (fn [m]
+                                 (if (union-type? m)
+                                   (rest (normalize-union m))
+                                   [m])))
+                       distinct
+                       vec)]
+      (case (count members)
+        0 :any
+        1 (first members)
+        (into [:or] members)))))
+
+(defn subtract-type
+  "Remove `to-remove` from type `t`. For else-branch narrowing.
+   Only meaningful on unions; `:any` stays `:any`."
+  [t to-remove]
+  (cond
+    (= t to-remove) :nothing
+    (= t :any) :any
+    (union-type? t)
+    (let [remaining (remove (fn [m] (= m to-remove)) (rest t))]
+      (normalize-union (into [:or] remaining)))
+    :else t))
+
+(defn remove-falsy
+  "Remove :nil and :boolean from a union (for truthiness narrowing in then-branch).
+   On non-union types: if type is :nil return :nothing, otherwise leave as-is."
+  [t]
+  (cond
+    (= t :nil) :nothing
+    (union-type? t)
+    (let [remaining (remove #{:nil} (rest t))]
+      (normalize-union (into [:or] remaining)))
+    :else t))
+
+(defn add-falsy
+  "Add :nil to a type (for else-branch of truthiness narrowing)."
+  [t]
+  (cond
+    (= t :nil) :nil
+    (union-type? t)
+    (if (some #{:nil} (rest t))
+      t
+      (normalize-union (into [:or] (conj (vec (rest t)) :nil))))
+    :else (normalize-union [:or t :nil])))
+
 (defn tag->type
   "Map a tools.analyzer JVM tag to a Malli type."
   [tag]

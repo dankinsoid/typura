@@ -22,7 +22,25 @@
    'clojure.core/nth     {:sig [:=> [:cat :any :int] :any]}
 
    ;; IO — variadic: (println & args)
-   'clojure.core/println {:sig [:=> [:cat [:* :any]] :nil]}})
+   'clojure.core/println {:sig [:=> [:cat [:* :any]] :nil]}
+
+   ;; Type predicates — with guards for flow narrowing
+   'clojure.core/int?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :int}}
+   'clojure.core/integer? {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :int}}
+   'clojure.core/double?  {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :double}}
+   'clojure.core/number?  {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :number}}
+   'clojure.core/string?  {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :string}}
+   'clojure.core/keyword? {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :keyword}}
+   'clojure.core/symbol?  {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :symbol}}
+   'clojure.core/boolean? {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :boolean}}
+   'clojure.core/nil?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :nil}}
+   'clojure.core/map?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows [:map-of :any :any]}}
+   'clojure.core/vector?  {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows [:vector :any]}}
+   'clojure.core/set?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows [:set :any]}}
+   'clojure.core/seq?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :any}}
+   'clojure.core/some?    {:sig [:=> [:cat :any] :boolean]}
+   'clojure.core/true?    {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :boolean}}
+   'clojure.core/false?   {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :boolean}}})
 
 ;; tools.analyzer.jvm inlines arithmetic to static calls on Numbers.
 ;; Keys are [class-name-string method-name-string] for reliable lookup
@@ -44,6 +62,9 @@
 
 (defn lookup-stub [var-sym]
   (get-in core-stubs [var-sym :sig]))
+
+(defn lookup-guard [var-sym]
+  (get-in core-stubs [var-sym :guard]))
 
 (defn lookup-static [class method]
   (let [class-name (if (class? class) (.getName ^Class class) (str class))
