@@ -229,21 +229,22 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] Type subtraction in else-branch (subtype-aware: `number?` removes `:int`, `:double`)
 - [x] Nested guard narrowing (guards through `:do` wrappers from macro expansion)
 
-### Phase 2 — Stub System & Diagnostics
-- [ ] Stub file format (EDN with Malli schemas)
-- [ ] Stub loading by namespace (user > built-in priority)
-- [ ] Expand core stubs to ~50 most-used functions
-- [ ] Schema constructors for generics
+### Phase 2 — Diagnostics
 - [ ] **Diagnostic infrastructure** — `:diagnostics` accumulator in context, `{:type _ :diagnostics _}` return shape
 - [ ] **`:type-mismatch`** — argument type vs parameter type conflict detection
 - [ ] **`:arity-mismatch`** — wrong number of arguments to known functions
 - [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings
 
-### Phase 3 — Hook System
+### Phase 3 — Hook System & Stubs
+Hooks are the core primitive — SCI functions that receive and modify the analysis context.
+Stubs are a declarative DSL (EDN with Malli schemas) that compiles down to hook calls.
 - [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
 - [ ] Hook loading from `.typura/hooks/`
+- [ ] Stub file format (EDN with Malli schemas) — sugar over hooks
+- [ ] Stub loading by namespace (user > built-in priority)
+- [ ] Expand core stubs to ~50 most-used functions
+- [ ] Schema constructors for generics
 - [ ] Tag-based rule filtering
-- [ ] Built-in core hook (replaces/supplements stubs)
 
 ### Phase 4 — Protocols, Records, Multimethods
 - [ ] Protocol definitions → method signatures in context
