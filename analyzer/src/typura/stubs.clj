@@ -37,7 +37,7 @@
    'clojure.core/map?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows [:map-of :any :any]}}
    'clojure.core/vector?  {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows [:vector :any]}}
    'clojure.core/set?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows [:set :any]}}
-   'clojure.core/seq?     {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :any}}
+   'clojure.core/seq?     {:sig [:=> [:cat :any] :boolean]}
    'clojure.core/some?    {:sig [:=> [:cat :any] :boolean]}
    'clojure.core/true?    {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :boolean}}
    'clojure.core/false?   {:sig [:=> [:cat :any] :boolean] :guard {:arg 0 :narrows :boolean}}})
@@ -58,7 +58,12 @@
    ["clojure.lang.Numbers" "minusP"]          {:sig [:=> [:cat :number :number] :number]}
    ["clojure.lang.Numbers" "multiplyP"]       {:sig [:=> [:cat :number :number] :number]}
    ["clojure.lang.Numbers" "incP"]            {:sig [:=> [:cat :number] :number]}
-   ["clojure.lang.Numbers" "decP"]            {:sig [:=> [:cat :number] :number]}})
+   ["clojure.lang.Numbers" "decP"]            {:sig [:=> [:cat :number] :number]}
+
+   ;; Destructuring support — RT methods and PersistentArrayMap factory
+   ["clojure.lang.RT" "get"]                    {:sig [:=> [:cat :any :any] :any]}
+   ["clojure.lang.RT" "nth"]                    {:sig [:=> [:cat :any :int] :any]}
+   ["clojure.lang.PersistentArrayMap" "createAsIfByAssoc"] {:sig [:=> [:cat :any] [:map-of :any :any]]}})
 
 (defn lookup-stub [var-sym]
   (get-in core-stubs [var-sym :sig]))

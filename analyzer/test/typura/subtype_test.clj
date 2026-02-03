@@ -57,3 +57,53 @@
   (testing "arity mismatch"
     (is (not (sut/subtype? [:=> [:cat :int] :int]
                            [:=> [:cat :int :int] :int])))))
+
+;; --- Phase 3: Collection & Capability Subtyping ---
+
+(deftest vector-subtyping
+  (testing "covariant element"
+    (is (sut/subtype? [:vector :int] [:vector :number]))
+    (is (not (sut/subtype? [:vector :number] [:vector :int]))))
+  (testing "identity"
+    (is (sut/subtype? [:vector :string] [:vector :string])))
+  (testing "to :any"
+    (is (sut/subtype? [:vector :int] :any))))
+
+(deftest set-subtyping
+  (testing "covariant element"
+    (is (sut/subtype? [:set :int] [:set :number])))
+  (testing "identity"
+    (is (sut/subtype? [:set :keyword] [:set :keyword]))))
+
+(deftest map-of-subtyping
+  (testing "covariant"
+    (is (sut/subtype? [:map-of :keyword :int] [:map-of :keyword :number])))
+  (testing "key mismatch"
+    (is (not (sut/subtype? [:map-of :string :int] [:map-of :keyword :int])))))
+
+(deftest structural-map-to-map-of
+  (testing "keyword map fits map-of"
+    (is (sut/subtype? [:map [:a :int] [:b :string]]
+                      [:map-of :keyword :any])))
+  (testing "value type must fit"
+    (is (not (sut/subtype? [:map [:a :int] [:b :string]]
+                           [:map-of :keyword :int])))))
+
+(deftest capability-subtyping
+  (testing "vector satisfies capabilities"
+    (is (sut/subtype? [:vector :int] :cap/ifn))
+    (is (sut/subtype? [:vector :int] :cap/indexed))
+    (is (sut/subtype? [:vector :int] :cap/seqable))
+    (is (sut/subtype? [:vector :int] :cap/counted)))
+  (testing "map satisfies capabilities"
+    (is (sut/subtype? [:map [:a :int]] :cap/ilookup))
+    (is (sut/subtype? [:map [:a :int]] :cap/associative))
+    (is (not (sut/subtype? [:map [:a :int]] :cap/ifn))))
+  (testing "set satisfies capabilities"
+    (is (sut/subtype? [:set :int] :cap/ifn))
+    (is (sut/subtype? [:set :int] :cap/counted))
+    (is (not (sut/subtype? [:set :int] :cap/indexed))))
+  (testing "keyword satisfies capabilities"
+    (is (sut/subtype? :keyword :cap/ifn))
+    (is (sut/subtype? :keyword :cap/ilookup))
+    (is (not (sut/subtype? :keyword :cap/indexed)))))

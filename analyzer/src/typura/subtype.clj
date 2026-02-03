@@ -19,6 +19,10 @@
     (t/union-type? super)
     (some #(subtype? sub %) (rest super))
 
+    ;; keyword satisfies capabilities
+    (and (keyword? sub) (keyword? super) (= "cap" (namespace super)))
+    (contains? (get t/capability-satisfaction sub) super)
+
     ;; primitive hierarchy (transitive)
     (and (keyword? sub) (keyword? super))
     (let [parents (get t/primitive-parents sub)]
@@ -47,5 +51,32 @@
       (and (= (count sub-params) (count super-params))
            (every? true? (map subtype? super-params sub-params))
            (subtype? sub-ret super-ret)))
+
+    ;; vector covariant: [:vector :int] <: [:vector :number]
+    (and (t/vector-type? sub) (t/vector-type? super))
+    (subtype? (second sub) (second super))
+
+    ;; set covariant: [:set :int] <: [:set :number]
+    (and (t/set-type? sub) (t/set-type? super))
+    (subtype? (second sub) (second super))
+
+    ;; map-of covariant: [:map-of K1 V1] <: [:map-of K2 V2]
+    (and (t/map-of-type? sub) (t/map-of-type? super))
+    (and (subtype? (nth sub 1) (nth super 1))
+         (subtype? (nth sub 2) (nth super 2)))
+
+    ;; structural map <: map-of: all entries must fit
+    (and (t/map-type? sub) (t/map-of-type? super))
+    (let [k-super (nth super 1)
+          v-super (nth super 2)]
+      (every? (fn [entry]
+                (and (subtype? (if (keyword? (first entry)) :keyword :any) k-super)
+                     (subtype? (second entry) v-super)))
+              (rest sub)))
+
+    ;; capability subtyping: collection type satisfies capability
+    (and (vector? sub) (keyword? super) (= "cap" (namespace super)))
+    (let [tag (first sub)]
+      (contains? (get t/capability-satisfaction tag) super))
 
     :else false))

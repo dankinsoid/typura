@@ -48,6 +48,30 @@
 
 ;; --- Literals ---
 
+(defn- const-collection-type
+  "Infer a type for a constant collection value."
+  [val coll-type]
+  (case coll-type
+    :vector (if (empty? val)
+              [:vector :any]
+              (let [elem-types (mapv t/val->type val)
+                    unified (simplify-union (into [:or] elem-types))]
+                [:vector unified]))
+    :set    (if (empty? val)
+              [:set :any]
+              (let [elem-types (mapv t/val->type val)
+                    unified (simplify-union (into [:or] elem-types))]
+                [:set unified]))
+    :map    (if (empty? val)
+              [:map-of :any :any]
+              (if (every? keyword? (keys val))
+                (into [:map] (mapv (fn [[k v]] [k (t/val->type v)]) val))
+                (let [k-types (mapv t/val->type (keys val))
+                      v-types (mapv t/val->type (vals val))]
+                  [:map-of (simplify-union (into [:or] k-types))
+                           (simplify-union (into [:or] v-types))])))
+    :any))
+
 (defmethod infer-node :const [node ctx]
   (let [tp (case (:type node)
              :number  (t/val->type (:val node))
@@ -58,6 +82,7 @@
              :char    :string
              :regex   :string
              :type    :any
+             (:vector :map :set) (const-collection-type (:val node) (:type node))
              :any)]
     [tp ctx]))
 
@@ -240,34 +265,122 @@
                     ctx')]
         [return-type ctx'']))))
 
+(defn- map-get-type
+  "Extract value type from a map type for a given keyword key.
+   Handles unions by checking each member."
+  [coll-type key-val]
+  (cond
+    (and (t/map-type? coll-type) (keyword? key-val))
+    (some (fn [entry] (when (= key-val (first entry)) (second entry)))
+          (rest coll-type))
+
+    (t/map-of-type? coll-type)
+    (nth coll-type 2)
+
+    ;; Union: try each member, return first match
+    (t/union-type? coll-type)
+    (some #(map-get-type % key-val) (rest coll-type))
+
+    :else nil))
+
+(defn- coll-nth-type
+  "Extract element type from a vector type."
+  [coll-type]
+  (when (t/vector-type? coll-type)
+    (second coll-type)))
+
+(defn- special-invoke
+  "Handle functions whose return type depends on argument values/types.
+   Returns [type ctx] or nil to fall through to standard logic."
+  [var-sym arg-types arg-nodes ctx]
+  (case var-sym
+    clojure.core/get
+    (let [coll-type (first arg-types)
+          key-node (second arg-nodes)
+          key-val (when (and key-node (= :const (:op key-node)))
+                    (:val key-node))]
+      (when-let [vt (map-get-type coll-type key-val)]
+        [vt ctx]))
+
+    clojure.core/nth
+    (when-let [et (coll-nth-type (first arg-types))]
+      [et ctx])
+
+    ;; default — not special
+    nil))
+
 (defmethod infer-node :invoke [node ctx]
   (let [fn-node (:fn node)
         [arg-types ctx'] (infer-args (:args node) ctx)
+        ;; Try special-case dispatch first
+        var-sym (when (= :var (:op fn-node))
+                  (-> fn-node :var symbol))
+        special (when var-sym
+                  (special-invoke var-sym arg-types (:args node) ctx'))
         ;; Resolve the function type
-        fn-type (case (:op fn-node)
-                  :var (let [var-sym (-> fn-node :var symbol)]
-                         (or (ctx/lookup-global ctx' var-sym)
-                             (stubs/lookup-stub var-sym)))
-                  :local (let [t (ctx/lookup-binding ctx' (:name fn-node))]
-                           (when (and t (t/fn-type? t)) t))
-                  nil)]
-    (if (and fn-type (t/fn-type? fn-type))
+        fn-type (when-not special
+                  (case (:op fn-node)
+                    :var (or (ctx/lookup-global ctx' var-sym)
+                             (stubs/lookup-stub var-sym))
+                    :local (let [t (ctx/lookup-binding ctx' (:name fn-node))]
+                             (when (and t (t/fn-type? t)) t))
+                    nil))]
+    (cond
+      special special
+      (and fn-type (t/fn-type? fn-type))
       (apply-fn-type ctx' fn-type arg-types (:args node))
-      ;; Unknown function or non-fn type
-      [:any ctx'])))
+      :else [:any ctx'])))
+
+(defn- special-static-call
+  "Handle RT.get / RT.nth static calls from destructuring expansion.
+   Returns [type ctx] or nil."
+  [class method arg-types arg-nodes ctx]
+  (let [class-name (if (class? class) (.getName ^Class class) (str class))
+        method-name (str method)]
+    (case [class-name method-name]
+      ["clojure.lang.RT" "get"]
+      (let [coll-type (first arg-types)
+            key-node (second arg-nodes)
+            key-val (when (and key-node (= :const (:op key-node)))
+                      (:val key-node))]
+        (when-let [vt (map-get-type coll-type key-val)]
+          [vt ctx]))
+
+      ["clojure.lang.RT" "nth"]
+      (when-let [et (coll-nth-type (first arg-types))]
+        [et ctx])
+
+      ;; default
+      nil)))
 
 (defmethod infer-node :static-call [node ctx]
   (let [[arg-types ctx'] (infer-args (:args node) ctx)
-        fn-type (stubs/lookup-static (:class node) (:method node))]
-    (if (and fn-type (t/fn-type? fn-type))
+        special (special-static-call (:class node) (:method node)
+                                     arg-types (:args node) ctx')
+        fn-type (when-not special
+                  (stubs/lookup-static (:class node) (:method node)))]
+    (cond
+      special special
+      (and fn-type (t/fn-type? fn-type))
       (apply-fn-type ctx' fn-type arg-types (:args node))
-      ;; Unknown static call — try JVM tag
-      [(or (t/tag->type (:tag node)) :any) ctx'])))
+      :else [(or (t/tag->type (:tag node)) :any) ctx'])))
+
+(defmethod infer-node :keyword-invoke [node ctx]
+  (let [kw-node (:keyword node)
+        target-node (:target node)
+        [target-type ctx'] (infer-node target-node ctx)
+        kw (:val kw-node)]
+    (if-let [vt (map-get-type target-type kw)]
+      [vt ctx']
+      [:any ctx'])))
 
 (defmethod infer-node :instance-call [node ctx]
-  ;; Phase 0: use JVM tag if available
-  (let [[_ ctx'] (infer-args (:args node) ctx)]
-    [(or (t/tag->type (:tag node)) :any) ctx']))
+  (let [[_ ctx'] (infer-args (:args node) ctx)
+        tag (:tag node)]
+    [(or (when (class? tag) (t/class->type tag))
+         (t/tag->type tag)
+         :any)
+     ctx']))
 
 ;; --- Functions ---
 
@@ -312,7 +425,9 @@
   [:any ctx])
 
 (defmethod infer-node :new [node ctx]
-  [:any ctx])
+  (let [[_ ctx'] (infer-args (:args node) ctx)
+        cls (:class node)]
+    [(or (when (class? cls) (t/class->type cls)) :any) ctx']))
 
 (defmethod infer-node :quote [node ctx]
   [:any ctx])
@@ -324,11 +439,33 @@
   [:any ctx])
 
 (defmethod infer-node :map [node ctx]
-  ;; Map literal — for Phase 0, return :any
-  [:any ctx])
+  (let [[key-types ctx'] (infer-args (:keys node) ctx)
+        [val-types ctx''] (infer-args (:vals node) ctx')
+        key-nodes (:keys node)]
+    (if (empty? key-types)
+      [[:map-of :any :any] ctx'']
+      (if (every? #(and (= :const (:op %))
+                        (= :keyword (:type %)))
+                  key-nodes)
+        ;; All keyword keys → structural map type
+        (let [entries (mapv (fn [kn vt] [(:val kn) vt])
+                            key-nodes val-types)]
+          [(into [:map] entries) ctx''])
+        ;; Mixed keys → homogeneous map-of type
+        (let [k-union (simplify-union (into [:or] key-types))
+              v-union (simplify-union (into [:or] val-types))]
+          [[:map-of k-union v-union] ctx''])))))
 
 (defmethod infer-node :vector [node ctx]
-  [:any ctx])
+  (let [[elem-types ctx'] (infer-args (:items node) ctx)]
+    (if (empty? elem-types)
+      [[:vector :any] ctx']
+      (let [unified (simplify-union (into [:or] elem-types))]
+        [[:vector unified] ctx']))))
 
 (defmethod infer-node :set [node ctx]
-  [:any ctx])
+  (let [[elem-types ctx'] (infer-args (:items node) ctx)]
+    (if (empty? elem-types)
+      [[:set :any] ctx']
+      (let [unified (simplify-union (into [:or] elem-types))]
+        [[:set unified] ctx']))))

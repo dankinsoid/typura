@@ -64,6 +64,14 @@
       (into [:cat] (map #(resolve-deep ctx %) (rest t)))
       (and (vector? t) (t/repeat-type? t))
       [(first t) (resolve-deep ctx (second t))]
+      (and (vector? t) (= :vector (first t)))
+      [:vector (resolve-deep ctx (second t))]
+      (and (vector? t) (= :set (first t)))
+      [:set (resolve-deep ctx (second t))]
+      (and (vector? t) (= :map (first t)))
+      (into [:map] (mapv (fn [entry] [(first entry) (resolve-deep ctx (second entry))]) (rest t)))
+      (and (vector? t) (= :map-of (first t)))
+      [:map-of (resolve-deep ctx (nth t 1)) (resolve-deep ctx (nth t 2))]
       :else t)))
 
 (defn constrain

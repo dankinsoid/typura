@@ -34,6 +34,15 @@
 (defn map-type? [t]
   (and (vector? t) (= :map (first t))))
 
+(defn vector-type? [t]
+  (and (vector? t) (= :vector (first t))))
+
+(defn set-type? [t]
+  (and (vector? t) (= :set (first t))))
+
+(defn map-of-type? [t]
+  (and (vector? t) (= :map-of (first t))))
+
 (defn repeat-type?
   "[:* type] or [:+ type] — variadic tail in :cat."
   [t]
@@ -119,3 +128,31 @@
     boolean :boolean
     void    :nil
     nil))
+
+(defn class->type
+  "Map a java.lang.Class to a Malli type."
+  [^Class cls]
+  (when cls
+    (cond
+      (= cls Long/TYPE)                            :int
+      (= cls Integer/TYPE)                          :int
+      (= cls Double/TYPE)                           :double
+      (= cls Float/TYPE)                            :double
+      (= cls Boolean/TYPE)                          :boolean
+      (= cls Void/TYPE)                             :nil
+      (= cls Long)                                  :int
+      (= cls Integer)                               :int
+      (= cls Double)                                :double
+      (= cls Float)                                 :double
+      (= cls Boolean)                               :boolean
+      (= cls String)                                :string
+      (.isAssignableFrom Number cls)                :number
+      :else                                         nil)))
+
+(def capability-satisfaction
+  "Maps collection type tags to the capabilities they satisfy."
+  {:vector  #{:cap/ifn :cap/ilookup :cap/indexed :cap/seqable :cap/associative :cap/counted}
+   :set     #{:cap/ifn :cap/counted :cap/seqable}
+   :map     #{:cap/ilookup :cap/seqable :cap/associative :cap/counted}
+   :map-of  #{:cap/ilookup :cap/seqable :cap/associative :cap/counted}
+   :keyword #{:cap/ifn :cap/ilookup}})

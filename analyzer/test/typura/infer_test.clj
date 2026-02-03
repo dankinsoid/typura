@@ -164,3 +164,62 @@
     (let [result (sut/analyze-form '(+ 1 2))]
       (is (empty? (:diagnostics result))))))
 
+;; --- Phase 3: Collections ---
+
+(deftest vector-literal-inference
+  (testing "const vector of ints"
+    (is (= [:vector :int] (:type (sut/analyze-form '[1 2 3])))))
+  (testing "const vector of mixed types"
+    (is (= [:vector [:or :int :string]]
+           (:type (sut/analyze-form '[1 "a"])))))
+  (testing "non-const vector"
+    (is (= [:vector :number]
+           (:type (sut/analyze-form '[(+ 1 2) (+ 3 4)])))))
+  (testing "empty vector"
+    ;; empty literal []; tools.analyzer may fold to const
+    (is (= [:vector :any] (:type (sut/analyze-form '[]))))))
+
+(deftest map-literal-inference
+  (testing "const keyword map"
+    (is (= [:map [:a :int] [:b :string]]
+           (:type (sut/analyze-form '{:a 1 :b "hi"})))))
+  (testing "non-const keyword map"
+    (is (= [:map [:a :number] [:b :string]]
+           (:type (sut/analyze-form '{:a (+ 1 2) :b (str "x")})))))
+  (testing "empty map"
+    (is (= [:map-of :any :any] (:type (sut/analyze-form '{}))))))
+
+(deftest set-literal-inference
+  (testing "const set of ints"
+    (is (= [:set :int] (:type (sut/analyze-form '#{1 2 3})))))
+  (testing "non-const set"
+    (is (= [:set :number]
+           (:type (sut/analyze-form '#{(+ 1 2) (+ 3 4)}))))))
+
+(deftest keyword-invoke-inference
+  (testing "keyword access on typed map"
+    (is (= :int (:type (sut/analyze-form '(:a {:a 1 :b "hi"}))))))
+  (testing "keyword access on let-bound map"
+    (is (= :string
+           (:type (sut/analyze-form '(let [m {:x 1 :y "hello"}] (:y m)))))))
+  (testing "unknown key returns :any"
+    (is (= :any (:type (sut/analyze-form '(:z {:a 1})))))))
+
+(deftest get-inference
+  (testing "get on keyword map with const key"
+    (is (= :int (:type (sut/analyze-form '(get {:a 1 :b "hi"} :a))))))
+  (testing "get unknown key"
+    (is (= :any (:type (sut/analyze-form '(get {:a 1} :z)))))))
+
+(deftest nth-inference
+  (testing "nth on vector"
+    (is (= :int (:type (sut/analyze-form '(nth [1 2 3] 0)))))))
+
+(deftest destructuring-inference
+  ;; Map destructuring deferred — see CLAUDE.md Phase 3 note.
+  ;; The macro expansion `(if (seq? m) ... m)` loses map type info.
+  (testing "sequential destructuring via macro expansion"
+    (is (= :int
+           (:type (sut/analyze-form
+                   '(let [[a b] [1 2]] a)))))))
+

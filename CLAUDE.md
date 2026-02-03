@@ -234,21 +234,24 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] **`:type-mismatch`** — argument type vs parameter type conflict detection (fixed & variadic params)
 - [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings (deferred)
 
-### Phase 3 — Clojure Core Abstractions & Interop
-Model Clojure's core interfaces/protocols as capabilities that `subtype?` understands:
-- [ ] Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
-  - Maps, vectors, sets, keywords satisfy different subsets of these
-  - Usage-based inference: `(x 5)` → x is `IFn`, `(:key x)` → x has key `:key`, `(nth x 0)` → x is `Indexed`
-- [ ] **Destructuring analysis** — infer types from binding patterns
-  - Sequential destructuring (`[a b & rest]`) → source must be `Indexed`/`Seqable`, elements get positional types
-  - Associative destructuring (`{:keys [x y]}`, `{x :x}`) → source must be map with corresponding keys, bindings get value types
-  - `:as` bindings → alias for the whole source type
-  - Nested destructuring → recursive type narrowing
-  - `:or` defaults → union of destructured type with default type
-- [ ] Java interop types — rely on reflection info from tools.analyzer.jvm (not hardcoded hierarchy)
-  - Instance method return types, constructor types
-  - Class→type mapping from AST `:tag` metadata
-- [ ] Platform-agnostic capability model — same abstractions work on JVM (interfaces) and CLJS (protocols)
+### Phase 3 — Clojure Core Abstractions & Interop ✅
+- [x] Typed collection literals: `[:vector T]`, `[:set T]`, `[:map [:k T] ...]`, `[:map-of K V]`
+- [x] Smart `get`/`nth` — resolves value types from structural maps and vectors
+- [x] Keyword invocation `(:key m)` via `:keyword-invoke` handler
+- [x] Capability types: `:cap/ifn`, `:cap/ilookup`, `:cap/indexed`, `:cap/seqable`, `:cap/associative`, `:cap/counted`
+- [x] Capability satisfaction in `subtype?` for vectors, maps, sets, keywords
+- [x] Java interop: `class->type` mapping, improved `:instance-call`/`:new`/`:static-call`
+- [x] `RT/get`, `RT/nth` static call dispatch (used by macro-expanded destructuring)
+- [ ] **Destructuring analysis** — deferred to Phase 6 (see note below)
+
+> **Destructuring limitation:** Clojure's destructuring macros expand to
+> `(let* [map__0 m, map__1 (if (seq? map__0) (apply hash-map ...) map__0), x (RT/get map__1 :x)] x)`.
+> The `(if (seq? ...) ...)` guard produces `[:or :any <map-type>]` → `:any`, losing type info.
+> Sequential destructuring works (`[a b]` → `RT/nth` on typed vector).
+> Map destructuring requires stubs that are **arbitrary type-resolver functions**
+> `(fn [arg-types arg-nodes ctx] -> [return-type ctx'])` — not fixed `[:=> ...]` signatures.
+> This is the motivating case for Phase 6's hook system: `PersistentArrayMap/createAsIfByAssoc`
+> needs to propagate the input map type through to its return type (generics).
 
 ### Phase 4 — Protocols, Records, Multimethods
 - [ ] Protocol definitions → method signatures in context
@@ -269,7 +272,8 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
 
 ### Phase 6 — Hook System & Stubs
 Hooks are the core primitive — SCI functions that receive and modify the analysis context.
-Stubs are a declarative DSL (EDN with Malli schemas) that compiles down to hook calls.
+Stubs are **arbitrary Clojure functions** `(fn [arg-types arg-nodes ctx] -> [ret-type ctx'])`,
+not limited to fixed `[:=> ...]` signatures. The declarative DSL is sugar over these functions.
 - [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
 - [ ] Hook loading from `.typura/hooks/`
 - [ ] Stub file format (EDN with Malli schemas) — sugar over hooks
