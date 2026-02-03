@@ -40,7 +40,7 @@ typura/
 2. Walk expanded AST, building **type context** (environment)
 3. Bidirectional type inference: synthesize bottom-up + check top-down
 4. Propagate constraints through call graph
-5. Report errors where constraints conflict
+5. Collect diagnostics where inferred type conflicts with expected type in context
 
 ### Type Context
 Immutable, scoped map enriched during AST traversal:
@@ -141,6 +141,51 @@ Also: truthiness narrowing (removes `:nil`/`:false` from unions in then-branch o
 - `defmethod` → tracked implementations; warn if dispatch value not covered
 - Protocol method calls → verify argument satisfies protocol
 
+### Diagnostics (Error Reporting)
+
+The analyzer collects diagnostics during inference — not as a separate pass, but inline
+as type conflicts are detected. A **conflict** is when a value's inferred type is incompatible
+with the expected type in context. This is distinct from unions (multiple possible types)
+which are valid.
+
+**Conflict vs union:**
+```clojure
+;; NOT a conflict — union type [:or :int :string]
+(if condition (+ x 1) (str x))
+
+;; CONFLICT — :int is not a valid first arg to `map` (expects IFn/ISeq)
+(if (int? i) (map i coll) ...)
+
+;; CONFLICT — arity mismatch
+(+ 1 2 3)  ;; if stub says [:=> [:cat :number :number] :number]
+```
+
+**Diagnostic structure:**
+```clojure
+{:level    :error|:warning|:info
+ :code     :type-mismatch|:arity-mismatch|:unreachable-branch|...
+ :message  "Expected :string, got :int"
+ :loc      {:file "src/foo.clj" :line 12 :col 5 :end-line 12 :end-col 15}
+ :expected <type>    ; what context required
+ :actual   <type>}   ; what was inferred
+```
+
+**Diagnostic codes (initial set):**
+| Code | Level | Description |
+|---|---|---|
+| `:type-mismatch` | error | Argument type doesn't satisfy parameter type |
+| `:arity-mismatch` | error | Wrong number of arguments |
+| `:unreachable-branch` | warning | Guard narrows to `:nothing`, branch is dead code |
+| `:narrowed-misuse` | warning | Value used in way incompatible with narrowed type |
+
+**Collection strategy:** collect-all (don't stop at first error). The walker accumulates
+diagnostics in the context (`:diagnostics` key) and returns them with the final result.
+The analyzer API returns `{:type <inferred> :diagnostics [...]}`  — consumers (CLI, LSP)
+format output from this.
+
+**Source locations:** every diagnostic must carry `:loc` from the AST node. tools.analyzer
+provides `:env` with `:line`/`:column` on each node — use these directly.
+
 ## Dependencies
 
 - **malli** — type/schema representation
@@ -184,11 +229,15 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] Type subtraction in else-branch (subtype-aware: `number?` removes `:int`, `:double`)
 - [x] Nested guard narrowing (guards through `:do` wrappers from macro expansion)
 
-### Phase 2 — Stub System
+### Phase 2 — Stub System & Diagnostics
 - [ ] Stub file format (EDN with Malli schemas)
 - [ ] Stub loading by namespace (user > built-in priority)
 - [ ] Expand core stubs to ~50 most-used functions
 - [ ] Schema constructors for generics
+- [ ] **Diagnostic infrastructure** — `:diagnostics` accumulator in context, `{:type _ :diagnostics _}` return shape
+- [ ] **`:type-mismatch`** — argument type vs parameter type conflict detection
+- [ ] **`:arity-mismatch`** — wrong number of arguments to known functions
+- [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings
 
 ### Phase 3 — Hook System
 - [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
@@ -222,7 +271,8 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
 ### Phase 7 — LSP + CLI
 - [ ] CLI: `clj -M:typura check src/`
 - [ ] LSP server for real-time editor feedback
-- [ ] Output formats: human-readable + EDN/JSON
+- [ ] **Diagnostic output** — human-readable (with source snippets + underlines), EDN, JSON
+- [ ] LSP `textDocument/publishDiagnostics` — map internal diagnostics to LSP protocol
 - [ ] Incremental analysis with file-level caching
 
 ### Open Questions
