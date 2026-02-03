@@ -256,6 +256,12 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
 - [ ] Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
   - Maps, vectors, sets, keywords satisfy different subsets of these
   - Usage-based inference: `(x 5)` → x is `IFn`, `(:key x)` → x has key `:key`, `(nth x 0)` → x is `Indexed`
+- [ ] **Destructuring analysis** — infer types from binding patterns
+  - Sequential destructuring (`[a b & rest]`) → source must be `Indexed`/`Seqable`, elements get positional types
+  - Associative destructuring (`{:keys [x y]}`, `{x :x}`) → source must be map with corresponding keys, bindings get value types
+  - `:as` bindings → alias for the whole source type
+  - Nested destructuring → recursive type narrowing
+  - `:or` defaults → union of destructured type with default type
 - [ ] Java interop types — rely on reflection info from tools.analyzer.jvm (not hardcoded hierarchy)
   - Instance method return types, constructor types
   - Class→type mapping from AST `:tag` metadata
@@ -273,6 +279,10 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
 - [ ] LSP server for real-time editor feedback
 - [ ] **Diagnostic output** — human-readable (with source snippets + underlines), EDN, JSON
 - [ ] LSP `textDocument/publishDiagnostics` — map internal diagnostics to LSP protocol
+- [ ] **Hover documentation** — enrich `textDocument/hover` with inferred type signatures
+  - Show inferred arg/return types for functions (even without annotations)
+  - Show narrowed type in context (e.g. after guard, inside branch)
+  - Augment existing docstrings with type info, don't replace them
 - [ ] Incremental analysis with file-level caching
 
 ### Open Questions
