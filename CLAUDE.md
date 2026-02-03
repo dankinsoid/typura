@@ -59,12 +59,13 @@ Malli schemas as the type language. Malli supports keywords, Java classes, and p
 | Category | Example |
 |---|---|
 | Primitives | `:int`, `:string`, `:keyword`, `:boolean`, `:nil` |
-| Java classes | `java.lang.String`, `java.util.Map` |
+| Java classes | `java.lang.String`, `java.util.Map` (from reflection, not hardcoded) |
 | Predicates | `int?`, `pos?`, `string?` |
 | Collections | `[:vector :int]`, `[:set :keyword]`, `[:map-of :keyword :any]` |
 | Typed maps | `[:map [:id :string] [:name :string]]` |
 | Functions | `[:=> [:cat :int :int] :int]` |
 | Unions | `[:or :int :nil]` |
+| Capabilities | `IFn`, `ILookup`, `Indexed`, `Seqable`, `Associative`, `Counted` |
 | Schema constructors | `(Array :int)` → `[:vector :int]` (generics as functions) |
 
 **Generics** are schema constructors — functions that take schemas and return schemas:
@@ -199,7 +200,24 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 3. Record definitions → typed map schemas
 4. Multimethod dispatch tracking and coverage warnings
 
-### Phase 5 — LSP + CLI
+### Phase 5 — Clojure Core Abstractions & Interop
+Model Clojure's core interfaces/protocols as capabilities that `subtype?` understands:
+1. Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
+   - Maps, vectors, sets, keywords satisfy different subsets of these
+   - Usage-based inference: `(x 5)` → x is `IFn`, `(:key x)` → x has key `:key`, `(nth x 0)` → x is `Indexed`
+2. Java interop types — rely on reflection info from tools.analyzer.jvm (not hardcoded hierarchy)
+   - Instance method return types, constructor types
+   - Class→type mapping from AST `:tag` metadata
+3. Platform-agnostic capability model — same abstractions work on JVM (interfaces) and CLJS (protocols)
+
+### Phase 6 — ClojureScript Support
+1. Abstract analyzer interface — decouple from tools.analyzer.jvm
+2. tools.analyzer.js backend for CLJS
+3. Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
+4. Shared core logic, platform-specific stubs
+5. Conditional reader tags for platform-aware stubs (`.cljc`)
+
+### Phase 7 — LSP + CLI
 1. CLI: `clj -M:typura check src/`
 2. LSP server for real-time editor feedback
 3. Output formats: human-readable + EDN/JSON
@@ -210,3 +228,4 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - Constants as types (TypeScript-style literal types)?
 - How deep to go with cross-namespace constraint propagation?
 - Schema merging / intersection types?
+- Java generics — how deep to go? `List<String>` vs erased `List`?
