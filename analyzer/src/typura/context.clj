@@ -46,14 +46,15 @@
       (t/tvar? t) t
       (keyword? t) t
       (and (vector? t) (= :=> (first t)))
-      (let [params (second t)
-            ret (nth t 2)]
-        [:=> (into [:cat] (map #(resolve-deep ctx %) (rest params)))
+      (let [ret (nth t 2)]
+        [:=> (resolve-deep ctx (second t))
          (resolve-deep ctx ret)])
       (and (vector? t) (= :or (first t)))
       (into [:or] (map #(resolve-deep ctx %) (rest t)))
       (and (vector? t) (= :cat (first t)))
       (into [:cat] (map #(resolve-deep ctx %) (rest t)))
+      (and (vector? t) (t/repeat-type? t))
+      [(first t) (resolve-deep ctx (second t))]
       :else t)))
 
 (defn constrain

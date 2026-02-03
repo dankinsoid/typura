@@ -34,6 +34,11 @@
 (defn map-type? [t]
   (and (vector? t) (= :map (first t))))
 
+(defn repeat-type?
+  "[:* type] or [:+ type] — variadic tail in :cat."
+  [t]
+  (and (vector? t) (#{:* :+} (first t))))
+
 (defn val->type
   "Map a JVM value to a Malli type keyword."
   [val]

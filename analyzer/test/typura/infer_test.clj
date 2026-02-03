@@ -46,6 +46,16 @@
     (is (= [:=> [:cat :number :number] :number]
            (:type (sut/analyze-form '(defn add [a b] (+ a b))))))))
 
+(deftest variadic-inference
+  (testing "str with multiple args"
+    (is (= :string (:type (sut/analyze-form '(str "a" "b" "c"))))))
+  (testing "str with no args"
+    (is (= :string (:type (sut/analyze-form '(str))))))
+  (testing "println with multiple args"
+    (is (= :nil (:type (sut/analyze-form '(println 1 2 3))))))
+  (testing "println with no args"
+    (is (= :nil (:type (sut/analyze-form '(println)))))))
+
 (deftest str-inference
   (testing "str returns string"
     (is (= :string (:type (sut/analyze-form '(str 42)))))))

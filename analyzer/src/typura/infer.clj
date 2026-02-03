@@ -96,21 +96,46 @@
           [[] ctx]
           args))
 
+(defn- parse-params
+  "Split [:cat ...] into [fixed-params variadic-element-type-or-nil].
+   Variadic tail is the last element if it's [:* T] or [:+ T]."
+  [cat-schema]
+  (let [params (vec (rest cat-schema)) ; skip :cat
+        last-p (peek params)]
+    (if (and last-p (t/repeat-type? last-p))
+      [(pop params) (second last-p)]
+      [params nil])))
+
 (defn- apply-fn-type
   "Apply a function type to argument types. Constrains args and returns result type."
   [ctx fn-type arg-types]
-  (let [param-types (rest (second fn-type)) ; skip :cat
-        return-type (nth fn-type 2)]
-    (if (not= (count param-types) (count arg-types))
-      ;; Arity mismatch — degrade to :any
+  (let [[fixed-params variadic-type] (parse-params (second fn-type))
+        return-type (nth fn-type 2)
+        n-fixed (count fixed-params)
+        n-args (count arg-types)]
+    (cond
+      ;; Not enough args for fixed params
+      (< n-args n-fixed)
       [return-type ctx]
-      (let [ctx' (reduce (fn [c [arg-t param-t]]
-                           (if c
-                             (ctx/constrain c arg-t param-t)
-                             nil))
+
+      ;; More args than fixed but no variadic — arity mismatch
+      (and (> n-args n-fixed) (nil? variadic-type))
+      [return-type ctx]
+
+      :else
+      (let [;; Constrain fixed params
+            ctx' (reduce (fn [c [arg-t param-t]]
+                           (if c (ctx/constrain c arg-t param-t) nil))
                          ctx
-                         (map vector arg-types param-types))]
-        [return-type (or ctx' ctx)]))))
+                         (map vector arg-types fixed-params))
+            ;; Constrain variadic args
+            ctx'' (if (and ctx' variadic-type)
+                    (reduce (fn [c arg-t]
+                              (if c (ctx/constrain c arg-t variadic-type) nil))
+                            ctx'
+                            (drop n-fixed arg-types))
+                    ctx')]
+        [return-type (or ctx'' ctx)]))))
 
 (defmethod infer-node :invoke [node ctx]
   (let [fn-node (:fn node)
