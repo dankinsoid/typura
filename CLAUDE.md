@@ -234,24 +234,13 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] **`:type-mismatch`** — argument type vs parameter type conflict detection (fixed & variadic params)
 - [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings (deferred)
 
-### Phase 3 — Hook System & Stubs
-Hooks are the core primitive — SCI functions that receive and modify the analysis context.
-Stubs are a declarative DSL (EDN with Malli schemas) that compiles down to hook calls.
-- [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
-- [ ] Hook loading from `.typura/hooks/`
-- [ ] Stub file format (EDN with Malli schemas) — sugar over hooks
-- [ ] Stub loading by namespace (user > built-in priority)
-- [ ] Expand core stubs to ~50 most-used functions
-- [ ] Schema constructors for generics
-- [ ] Tag-based rule filtering
-
-### Phase 4 — Protocols, Records, Multimethods
+### Phase 3 — Protocols, Records, Multimethods
 - [ ] Protocol definitions → method signatures in context
 - [ ] Protocol/interface satisfaction checking in subtype layer
 - [ ] Record definitions → typed map schemas
 - [ ] Multimethod dispatch tracking and coverage warnings
 
-### Phase 5 — Clojure Core Abstractions & Interop
+### Phase 4 — Clojure Core Abstractions & Interop
 Model Clojure's core interfaces/protocols as capabilities that `subtype?` understands:
 - [ ] Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
   - Maps, vectors, sets, keywords satisfy different subsets of these
@@ -267,14 +256,7 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
   - Class→type mapping from AST `:tag` metadata
 - [ ] Platform-agnostic capability model — same abstractions work on JVM (interfaces) and CLJS (protocols)
 
-### Phase 6 — ClojureScript Support
-- [ ] Abstract analyzer interface — decouple from tools.analyzer.jvm
-- [ ] tools.analyzer.js backend for CLJS
-- [ ] Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
-- [ ] Shared core logic, platform-specific stubs
-- [ ] Conditional reader tags for platform-aware stubs (`.cljc`)
-
-### Phase 7 — LSP + CLI
+### Phase 5 — LSP + CLI
 - [ ] CLI: `clj -M:typura check src/`
 - [ ] LSP server for real-time editor feedback
 - [ ] **Diagnostic output** — human-readable (with source snippets + underlines), EDN, JSON
@@ -284,6 +266,24 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
   - Show narrowed type in context (e.g. after guard, inside branch)
   - Augment existing docstrings with type info, don't replace them
 - [ ] Incremental analysis with file-level caching
+
+### Phase 6 — Hook System & Stubs
+Hooks are the core primitive — SCI functions that receive and modify the analysis context.
+Stubs are a declarative DSL (EDN with Malli schemas) that compiles down to hook calls.
+- [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
+- [ ] Hook loading from `.typura/hooks/`
+- [ ] Stub file format (EDN with Malli schemas) — sugar over hooks
+- [ ] Stub loading by namespace (user > built-in priority)
+- [ ] Expand core stubs to ~50 most-used functions
+- [ ] Schema constructors for generics
+- [ ] Tag-based rule filtering
+
+### Phase 7 — ClojureScript Support
+- [ ] Abstract analyzer interface — decouple from tools.analyzer.jvm
+- [ ] tools.analyzer.js backend for CLJS
+- [ ] Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
+- [ ] Shared core logic, platform-specific stubs
+- [ ] Conditional reader tags for platform-aware stubs (`.cljc`)
 
 ### Open Questions
 - Recursive types (trees, linked lists) — Malli `:ref` + inference?
