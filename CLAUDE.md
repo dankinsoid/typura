@@ -234,13 +234,7 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] **`:type-mismatch`** — argument type vs parameter type conflict detection (fixed & variadic params)
 - [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings (deferred)
 
-### Phase 3 — Protocols, Records, Multimethods
-- [ ] Protocol definitions → method signatures in context
-- [ ] Protocol/interface satisfaction checking in subtype layer
-- [ ] Record definitions → typed map schemas
-- [ ] Multimethod dispatch tracking and coverage warnings
-
-### Phase 4 — Clojure Core Abstractions & Interop
+### Phase 3 — Clojure Core Abstractions & Interop
 Model Clojure's core interfaces/protocols as capabilities that `subtype?` understands:
 - [ ] Core capability types: `ILookup`, `IFn`, `Indexed`, `Seqable`, `Associative`, `Counted`
   - Maps, vectors, sets, keywords satisfy different subsets of these
@@ -255,6 +249,12 @@ Model Clojure's core interfaces/protocols as capabilities that `subtype?` unders
   - Instance method return types, constructor types
   - Class→type mapping from AST `:tag` metadata
 - [ ] Platform-agnostic capability model — same abstractions work on JVM (interfaces) and CLJS (protocols)
+
+### Phase 4 — Protocols, Records, Multimethods
+- [ ] Protocol definitions → method signatures in context
+- [ ] Protocol/interface satisfaction checking in subtype layer
+- [ ] Record definitions → typed map schemas
+- [ ] Multimethod dispatch tracking and coverage warnings
 
 ### Phase 5 — LSP + CLI
 - [ ] CLI: `clj -M:typura check src/`
@@ -286,8 +286,7 @@ Stubs are a declarative DSL (EDN with Malli schemas) that compiles down to hook 
 - [ ] Conditional reader tags for platform-aware stubs (`.cljc`)
 
 ### Open Questions
-- Recursive types (trees, linked lists) — Malli `:ref` + inference?
-- Constants as types (TypeScript-style literal types)?
-- How deep to go with cross-namespace constraint propagation?
-- Schema merging / intersection types?
-- Java generics — how deep to go? `List<String>` vs erased `List`?
+- Recursive types (trees, linked lists) — Malli `:ref` + inference? - yes
+- Constants as types (TypeScript-style literal types)? - yes
+- How deep to go with cross-namespace constraint propagation? - unclear yet, likely unlimited
+- Schema merging / intersection types? - yes
