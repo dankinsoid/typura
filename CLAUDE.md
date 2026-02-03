@@ -177,12 +177,12 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] **Basic test suite**
 - [x] **Result**: can analyze `(defn add [a b] (+ a b))` → `{:args [:number :number] :return :number}`
 
-### Phase 1 — Flow Analysis (in progress)
+### Phase 1 — Flow Analysis ✅
 - [x] Type narrowing in `if` branches via guard predicates (`int?`, `string?`, etc.)
 - [x] Truthiness narrowing (remove nil from unions in then-branch)
 - [x] Union type normalization (dedup, subtype simplification)
-- [ ] Type subtraction in else-branch (subtract guard type from unions)
-- [ ] Nested guard narrowing (guards inside `let`, `do`, etc.)
+- [x] Type subtraction in else-branch (subtype-aware: `number?` removes `:int`, `:double`)
+- [x] Nested guard narrowing (guards through `:do` wrappers from macro expansion)
 
 ### Phase 2 — Stub System
 - [ ] Stub file format (EDN with Malli schemas)

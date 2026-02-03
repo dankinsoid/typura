@@ -19,6 +19,19 @@
                          members)]
         (t/normalize-union (into [:or] keep))))))
 
+(defn- subtract-type-deep
+  "Subtype-aware type subtraction. Removes all union members that are
+   subtypes of `to-remove`. E.g. (subtract [:or :int :double :string] :number)
+   removes :int and :double since both are subtypes of :number."
+  [t to-remove]
+  (cond
+    (sub/subtype? t to-remove) :nothing
+    (= t :any) :any
+    (t/union-type? t)
+    (let [remaining (remove #(sub/subtype? % to-remove) (rest t))]
+      (t/normalize-union (into [:or] remaining)))
+    :else t))
+
 (defmulti infer-node
   "Infer the type of an AST node. Returns [type, updated-ctx]."
   (fn [node ctx] (:op node)))
@@ -91,26 +104,39 @@
 
 ;; --- Conditionals ---
 
+(defn- unwrap-test-node
+  "Unwrap :do wrappers to get the effective test expression.
+   Macros often expand to (do side-effects... expr), so the real
+   test is the :ret of the :do node."
+  [node]
+  (if (= :do (:op node))
+    (recur (:ret node))
+    node))
+
 (defn- extract-guard-info
-  "If test node is (pred? x), return {:sym local-symbol :narrows type} or nil."
+  "If test node is (pred? x), return {:sym local-symbol :narrows type} or nil.
+   Looks through :do wrappers from macro expansion."
   [test-node]
-  (when (= :invoke (:op test-node))
-    (let [fn-node (:fn test-node)
-          args (:args test-node)]
-      (when (and (= :var (:op fn-node))
-                 (= 1 (count args))
-                 (= :local (:op (first args))))
-        (let [var-sym (-> fn-node :var symbol)
-              guard (stubs/lookup-guard var-sym)]
-          (when (and guard (= 0 (:arg guard)))
-            {:sym (:name (first args))
-             :narrows (:narrows guard)}))))))
+  (let [test-node (unwrap-test-node test-node)]
+    (when (= :invoke (:op test-node))
+      (let [fn-node (:fn test-node)
+            args (:args test-node)]
+        (when (and (= :var (:op fn-node))
+                   (= 1 (count args))
+                   (= :local (:op (first args))))
+          (let [var-sym (-> fn-node :var symbol)
+                guard (stubs/lookup-guard var-sym)]
+            (when (and guard (= 0 (:arg guard)))
+              {:sym (:name (first args))
+               :narrows (:narrows guard)})))))))
 
 (defn- extract-test-local
-  "If test node is a simple local reference, return its symbol."
+  "If test node is a simple local reference, return its symbol.
+   Looks through :do wrappers from macro expansion."
   [test-node]
-  (when (= :local (:op test-node))
-    (:name test-node)))
+  (let [test-node (unwrap-test-node test-node)]
+    (when (= :local (:op test-node))
+      (:name test-node))))
 
 (defmethod infer-node :if [node ctx]
   (let [test-node (:test node)
@@ -132,7 +158,7 @@
                    guard
                    (let [orig (or (ctx/lookup-binding ctx' (:sym guard)) :any)]
                      (ctx/extend-binding ctx' (:sym guard)
-                                         (t/subtract-type orig (:narrows guard))))
+                                         (subtract-type-deep orig (:narrows guard))))
                    :else ctx')
         [then-type _] (infer-node (:then node) then-ctx)
         [else-type _] (if (:else node)

@@ -86,6 +86,57 @@
   (testing "string? returns boolean"
     (is (= :boolean (:type (sut/analyze-form '(string? "x")))))))
 
+(deftest else-branch-subtraction
+  (testing "guard subtracts type in else-branch — return x to see narrowed type"
+    ;; x is [:or :int :string], int? narrows then to :int,
+    ;; else-branch subtracts :int → x is :string
+    ;; both branches return :string → result is :string
+    (is (= :string
+           (:type (sut/analyze-form
+                   '(let [x (if true 1 "hello")]
+                      (if (int? x)
+                        "was int"
+                        x)))))))
+  (testing "subtype-aware subtraction: number? removes int from union"
+    ;; x is [:or :int :string], number? narrows then to :number,
+    ;; else subtracts :number (removes :int as subtype) → x is :string
+    (is (= :string
+           (:type (sut/analyze-form
+                   '(let [x (if true 1 "hello")]
+                      (if (number? x)
+                        "was number"
+                        x)))))))
+  (testing "guard on non-union leaves else as-is"
+    (is (= :number
+           (:type (sut/analyze-form
+                   '(let [x 42]
+                      (if (int? x)
+                        (+ x 1)
+                        (+ x 2)))))))))
+
+(deftest nested-guard-do-wrapper
+  (testing "guard detected through do wrapper (when macro expansion)"
+    ;; (when pred body) expands to (if pred (do body) nil)
+    ;; but the test itself can also be wrapped in do by macros
+    (is (= :number
+           (:type (sut/analyze-form
+                   '(let [x 1]
+                      (if (do (int? x)) (+ x 1) 0))))))))
+
+(deftest truthiness-narrowing
+  (testing "if with local test removes nil in then-branch — return x"
+    ;; x is [:or :int :nil], truthiness removes :nil in then → x is :int
+    ;; else returns 0 (:int), so result is :int
+    (is (= :int
+           (:type (sut/analyze-form
+                   '(let [x (if true 1 nil)]
+                      (if x x 0)))))))
+  (testing "nil-only type: then-branch unreachable, result is else type"
+    (is (= :string
+           (:type (sut/analyze-form
+                   '(let [x nil]
+                      (if x x "was nil"))))))))
+
 (deftest union-normalization
   (testing "same branch types produce single type, not union"
     (is (= :int (:type (sut/analyze-form '(if true 1 2))))))

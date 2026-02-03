@@ -56,7 +56,8 @@
     :else                          :any))
 
 (defn normalize-union
-  "Flatten nested :or, deduplicate members, unwrap singletons."
+  "Flatten nested :or, deduplicate members, unwrap singletons.
+   Removes :nothing (bottom type) from unions."
   [t]
   (if-not (union-type? t)
     t
@@ -65,10 +66,11 @@
                                  (if (union-type? m)
                                    (rest (normalize-union m))
                                    [m])))
+                       (remove #{:nothing})
                        distinct
                        vec)]
       (case (count members)
-        0 :any
+        0 :nothing
         1 (first members)
         (into [:or] members)))))
 
