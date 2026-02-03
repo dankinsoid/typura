@@ -32,6 +32,13 @@
       (t/normalize-union (into [:or] remaining)))
     :else t))
 
+(defn- node->loc
+  "Extract source location from an AST node."
+  [node]
+  (let [env (:env node)]
+    (when (and (:line env) (:column env))
+      {:line (:line env) :col (:column env)})))
+
 (defmulti infer-node
   "Infer the type of an AST node. Returns [type, updated-ctx]."
   (fn [node ctx] (:op node)))
@@ -191,46 +198,61 @@
       [params nil])))
 
 (defn- apply-fn-type
-  "Apply a function type to argument types. Constrains args and returns result type."
-  [ctx fn-type arg-types]
+  "Apply a function type to argument types. Constrains args and returns result type.
+   `arg-nodes` are AST nodes used for diagnostic locations."
+  [ctx fn-type arg-types arg-nodes]
   (let [[fixed-params variadic-type] (parse-params (second fn-type))
         return-type (nth fn-type 2)
         n-fixed (count fixed-params)
         n-args (count arg-types)]
     (cond
-      ;; Not enough args for fixed params
       (< n-args n-fixed)
       [return-type ctx]
 
-      ;; More args than fixed but no variadic — arity mismatch
       (and (> n-args n-fixed) (nil? variadic-type))
       [return-type ctx]
 
       :else
-      (let [;; Constrain fixed params
-            ctx' (reduce (fn [c [arg-t param-t]]
-                           (if c (ctx/constrain c arg-t param-t) nil))
-                         ctx
-                         (map vector arg-types fixed-params))
+      (let [;; Constrain fixed params, collecting type-mismatch diagnostics
+            ctx' (reduce
+                   (fn [c [arg-t param-t arg-node]]
+                     (let [result (ctx/constrain c arg-t param-t)]
+                       (or result
+                           (ctx/emit-diagnostic c
+                             {:level :error :code :type-mismatch
+                              :message (str "Expected " param-t ", got " arg-t)
+                              :loc (node->loc arg-node)
+                              :expected param-t :actual arg-t}))))
+                   ctx
+                   (map vector arg-types fixed-params arg-nodes))
             ;; Constrain variadic args
-            ctx'' (if (and ctx' variadic-type)
-                    (reduce (fn [c arg-t]
-                              (if c (ctx/constrain c arg-t variadic-type) nil))
+            ctx'' (if variadic-type
+                    (reduce (fn [c [arg-t arg-node]]
+                              (let [result (ctx/constrain c arg-t variadic-type)]
+                                (or result
+                                    (ctx/emit-diagnostic c
+                                      {:level :error :code :type-mismatch
+                                       :message (str "Expected " variadic-type ", got " arg-t)
+                                       :loc (node->loc arg-node)
+                                       :expected variadic-type :actual arg-t}))))
                             ctx'
-                            (drop n-fixed arg-types))
+                            (map vector (drop n-fixed arg-types) (drop n-fixed arg-nodes)))
                     ctx')]
-        [return-type (or ctx'' ctx)]))))
+        [return-type ctx'']))))
 
 (defmethod infer-node :invoke [node ctx]
   (let [fn-node (:fn node)
         [arg-types ctx'] (infer-args (:args node) ctx)
         ;; Resolve the function type
-        fn-type (when (= :var (:op fn-node))
-                  (let [var-sym (-> fn-node :var symbol)]
-                    (or (ctx/lookup-global ctx' var-sym)
-                        (stubs/lookup-stub var-sym))))]
+        fn-type (case (:op fn-node)
+                  :var (let [var-sym (-> fn-node :var symbol)]
+                         (or (ctx/lookup-global ctx' var-sym)
+                             (stubs/lookup-stub var-sym)))
+                  :local (let [t (ctx/lookup-binding ctx' (:name fn-node))]
+                           (when (and t (t/fn-type? t)) t))
+                  nil)]
     (if (and fn-type (t/fn-type? fn-type))
-      (apply-fn-type ctx' fn-type arg-types)
+      (apply-fn-type ctx' fn-type arg-types (:args node))
       ;; Unknown function or non-fn type
       [:any ctx'])))
 
@@ -238,7 +260,7 @@
   (let [[arg-types ctx'] (infer-args (:args node) ctx)
         fn-type (stubs/lookup-static (:class node) (:method node))]
     (if (and fn-type (t/fn-type? fn-type))
-      (apply-fn-type ctx' fn-type arg-types)
+      (apply-fn-type ctx' fn-type arg-types (:args node))
       ;; Unknown static call — try JVM tag
       [(or (t/tag->type (:tag node)) :any) ctx'])))
 

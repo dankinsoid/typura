@@ -143,3 +143,24 @@
   (testing "different branch types produce union"
     (is (= [:or :int :string]
            (:type (sut/analyze-form '(if true 1 "x")))))))
+
+;; --- Phase 2: Diagnostics ---
+
+(deftest type-mismatch-diagnostic
+  (testing "string arg where number expected"
+    (let [result (sut/analyze-form '(+ "hello" 1))
+          diags (:diagnostics result)]
+      (is (= 1 (count diags)))
+      (is (= :type-mismatch (:code (first diags))))
+      (is (= :error (:level (first diags))))
+      (is (= :number (:expected (first diags))))
+      (is (= :string (:actual (first diags))))))
+  (testing "multiple mismatches reported"
+    (let [result (sut/analyze-form '(+ "a" "b"))
+          diags (:diagnostics result)]
+      (is (= 2 (count diags)))
+      (is (every? #(= :type-mismatch (:code %)) diags))))
+  (testing "no diagnostic on valid call"
+    (let [result (sut/analyze-form '(+ 1 2))]
+      (is (empty? (:diagnostics result))))))
+

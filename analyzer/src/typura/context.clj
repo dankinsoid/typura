@@ -3,9 +3,18 @@
             [typura.subtype :as sub]))
 
 (defn make-context []
-  {:bindings {}
-   :globals  {}
-   :subst    {}})
+  {:bindings    {}
+   :globals     {}
+   :subst       {}
+   :diagnostics []})
+
+(defn emit-diagnostic
+  "Append a diagnostic to the context's accumulator."
+  [ctx diagnostic]
+  (update ctx :diagnostics conj diagnostic))
+
+(defn get-diagnostics [ctx]
+  (:diagnostics ctx))
 
 (defn extend-binding [ctx sym type]
   (assoc-in ctx [:bindings sym] type))

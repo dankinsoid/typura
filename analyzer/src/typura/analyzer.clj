@@ -11,4 +11,5 @@
         initial-ctx (ctx/load-stubs (ctx/make-context) stubs/core-stubs)
         [inferred-type final-ctx] (infer/infer-node ast initial-ctx)]
     {:type (ctx/resolve-deep final-ctx inferred-type)
+     :diagnostics (ctx/get-diagnostics final-ctx)
      :ctx final-ctx}))

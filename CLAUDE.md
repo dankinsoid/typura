@@ -229,11 +229,10 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] Type subtraction in else-branch (subtype-aware: `number?` removes `:int`, `:double`)
 - [x] Nested guard narrowing (guards through `:do` wrappers from macro expansion)
 
-### Phase 2 — Diagnostics
-- [ ] **Diagnostic infrastructure** — `:diagnostics` accumulator in context, `{:type _ :diagnostics _}` return shape
-- [ ] **`:type-mismatch`** — argument type vs parameter type conflict detection
-- [ ] **`:arity-mismatch`** — wrong number of arguments to known functions
-- [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings
+### Phase 2 — Diagnostics ✅
+- [x] **Diagnostic infrastructure** — `:diagnostics` accumulator in context, `{:type _ :diagnostics _}` return shape
+- [x] **`:type-mismatch`** — argument type vs parameter type conflict detection (fixed & variadic params)
+- [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings (deferred)
 
 ### Phase 3 — Hook System & Stubs
 Hooks are the core primitive — SCI functions that receive and modify the analysis context.
