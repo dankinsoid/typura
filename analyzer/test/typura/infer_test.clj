@@ -223,3 +223,23 @@
            (:type (sut/analyze-form
                    '(let [[a b] [1 2]] a)))))))
 
+;; --- Phase 6: Functional Stubs & Inline Annotations ---
+
+(deftest inline-annotation
+  (testing "defn with :typura/sig overrides inferred type"
+    ;; Define an annotated function, then call it
+    (let [result (sut/analyze-form
+                   '(do (defn ^{:typura/sig [:=> [:cat :int :string] :number]}
+                          my-fn [a b] nil)
+                        (my-fn 1 "hello")))]
+      (is (= :number (:type result)))
+      (is (empty? (:diagnostics result)))))
+  (testing "defn annotation produces type-mismatch on wrong args"
+    (let [result (sut/analyze-form
+                   '(do (defn ^{:typura/sig [:=> [:cat :int :string] :number]}
+                          my-fn2 [a b] nil)
+                        (my-fn2 "wrong" 42)))
+          diags (:diagnostics result)]
+      (is (= 2 (count diags)))
+      (is (every? #(= :type-mismatch (:code %)) diags)))))
+

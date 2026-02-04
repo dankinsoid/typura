@@ -270,14 +270,32 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
   - Augment existing docstrings with type info, don't replace them
 - [ ] Incremental analysis with file-level caching
 
-### Phase 6 — Hook System & Stubs
-Hooks are the core primitive — SCI functions that receive and modify the analysis context.
-Stubs are **arbitrary Clojure functions** `(fn [arg-types arg-nodes ctx] -> [ret-type ctx'])`,
-not limited to fixed `[:=> ...]` signatures. The declarative DSL is sugar over these functions.
+### Phase 6 — Hook System & Stubs (in progress)
+Every stub is a function `(fn [arg-types arg-nodes ctx] -> [ret-type ctx'])`.
+Helper `sig` creates these from Malli schemas; complex stubs are hand-written fns.
+Same mechanism for external stubs and inline annotations.
+
+**Done:**
+- [x] **Unified functional stubs** — stubs are functions, not fixed schemas
+  - `sig` helper wraps `[:=> ...]` into a stub fn (with schema in metadata)
+  - `sig+guard` attaches flow-narrowing guards as fn metadata
+  - Custom resolvers for context-dependent return types (`get`, `nth`)
+- [x] **Inline annotations** — `{:typura/sig [:=> ...]}` metadata on `defn`
+  - Analyzer reads var metadata, wraps schema with `sig`, stores stub fn in globals
+  - Callers get arg checking and return type from the annotation
+- [x] **Refactored inference** — `special-invoke`/`special-static-call` eliminated
+  - All dispatch goes through stub functions (data-driven, not hardcoded)
+  - `typura.check` namespace extracted for shared type-checking utilities
+
+**Remaining:**
+- [ ] Helper function library (typura core API for stub authors)
+- [ ] **SCI integration** — sandbox for evaluating user-defined stub/hook files
+  - SCI dependency already declared (`org.babashka/sci 0.8.42`), not yet used in code
+  - Load `.typura/hooks/*.clj` files, evaluate resolver fns in SCI sandbox
+  - Expose typura API to SCI context (`sig`, `sig+guard`, `check/*` utilities)
+  - User stubs override built-in stubs (user > built-in priority)
 - [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
-- [ ] Hook loading from `.typura/hooks/`
 - [ ] Stub file format (EDN with Malli schemas) — sugar over hooks
-- [ ] Stub loading by namespace (user > built-in priority)
 - [ ] Expand core stubs to ~50 most-used functions
 - [ ] Schema constructors for generics
 - [ ] Tag-based rule filtering

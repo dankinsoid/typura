@@ -31,12 +31,6 @@
 (defn lookup-global [ctx var-sym]
   (get-in ctx [:globals var-sym]))
 
-(defn load-stubs [ctx stubs]
-  (reduce-kv (fn [c var-sym stub]
-               (extend-global c var-sym (:sig stub)))
-             ctx
-             stubs))
-
 (defn resolve-type
   "Follow tvar substitution chains to a concrete type."
   [ctx t]

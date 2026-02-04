@@ -2,6 +2,7 @@
   (:require [typura.types :as t]
             [typura.context :as ctx]
             [typura.stubs :as stubs]
+            [typura.check :as check]
             [typura.subtype :as sub]))
 
 (defn- simplify-union
@@ -31,13 +32,6 @@
     (let [remaining (remove #(sub/subtype? % to-remove) (rest t))]
       (t/normalize-union (into [:or] remaining)))
     :else t))
-
-(defn- node->loc
-  "Extract source location from an AST node."
-  [node]
-  (let [env (:env node)]
-    (when (and (:line env) (:column env))
-      {:line (:line env) :col (:column env)})))
 
 (defmulti infer-node
   "Infer the type of an AST node. Returns [type, updated-ctx]."
@@ -96,10 +90,16 @@
 
 (defmethod infer-node :var [node ctx]
   (let [var-sym (-> node :var symbol)
-        tp (or (ctx/lookup-global ctx var-sym)
-               (stubs/lookup-stub var-sym)
-               :any)]
-    [tp ctx]))
+        global (ctx/lookup-global ctx var-sym)
+        tp (cond
+             ;; Global is a stub fn → extract its advertised schema
+             (fn? global) (or (stubs/stub-schema global) :any)
+             ;; Global is a type
+             global global
+             ;; Fall back to core stubs
+             :else (when-let [sf (stubs/lookup-stub var-sym)]
+                     (or (stubs/stub-schema sf) :any)))]
+    [(or tp :any) ctx]))
 
 (defmethod infer-node :the-var [node ctx]
   (infer-node (assoc node :op :var) ctx))
@@ -212,157 +212,37 @@
           [[] ctx]
           args))
 
-(defn- parse-params
-  "Split [:cat ...] into [fixed-params variadic-element-type-or-nil].
-   Variadic tail is the last element if it's [:* T] or [:+ T]."
-  [cat-schema]
-  (let [params (vec (rest cat-schema)) ; skip :cat
-        last-p (peek params)]
-    (if (and last-p (t/repeat-type? last-p))
-      [(pop params) (second last-p)]
-      [params nil])))
-
-(defn- apply-fn-type
-  "Apply a function type to argument types. Constrains args and returns result type.
-   `arg-nodes` are AST nodes used for diagnostic locations."
-  [ctx fn-type arg-types arg-nodes]
-  (let [[fixed-params variadic-type] (parse-params (second fn-type))
-        return-type (nth fn-type 2)
-        n-fixed (count fixed-params)
-        n-args (count arg-types)]
-    (cond
-      (< n-args n-fixed)
-      [return-type ctx]
-
-      (and (> n-args n-fixed) (nil? variadic-type))
-      [return-type ctx]
-
-      :else
-      (let [;; Constrain fixed params, collecting type-mismatch diagnostics
-            ctx' (reduce
-                   (fn [c [arg-t param-t arg-node]]
-                     (let [result (ctx/constrain c arg-t param-t)]
-                       (or result
-                           (ctx/emit-diagnostic c
-                             {:level :error :code :type-mismatch
-                              :message (str "Expected " param-t ", got " arg-t)
-                              :loc (node->loc arg-node)
-                              :expected param-t :actual arg-t}))))
-                   ctx
-                   (map vector arg-types fixed-params arg-nodes))
-            ;; Constrain variadic args
-            ctx'' (if variadic-type
-                    (reduce (fn [c [arg-t arg-node]]
-                              (let [result (ctx/constrain c arg-t variadic-type)]
-                                (or result
-                                    (ctx/emit-diagnostic c
-                                      {:level :error :code :type-mismatch
-                                       :message (str "Expected " variadic-type ", got " arg-t)
-                                       :loc (node->loc arg-node)
-                                       :expected variadic-type :actual arg-t}))))
-                            ctx'
-                            (map vector (drop n-fixed arg-types) (drop n-fixed arg-nodes)))
-                    ctx')]
-        [return-type ctx'']))))
-
-(defn- map-get-type
-  "Extract value type from a map type for a given keyword key.
-   Handles unions by checking each member."
-  [coll-type key-val]
-  (cond
-    (and (t/map-type? coll-type) (keyword? key-val))
-    (some (fn [entry] (when (= key-val (first entry)) (second entry)))
-          (rest coll-type))
-
-    (t/map-of-type? coll-type)
-    (nth coll-type 2)
-
-    ;; Union: try each member, return first match
-    (t/union-type? coll-type)
-    (some #(map-get-type % key-val) (rest coll-type))
-
-    :else nil))
-
-(defn- coll-nth-type
-  "Extract element type from a vector type."
-  [coll-type]
-  (when (t/vector-type? coll-type)
-    (second coll-type)))
-
-(defn- special-invoke
-  "Handle functions whose return type depends on argument values/types.
-   Returns [type ctx] or nil to fall through to standard logic."
-  [var-sym arg-types arg-nodes ctx]
-  (case var-sym
-    clojure.core/get
-    (let [coll-type (first arg-types)
-          key-node (second arg-nodes)
-          key-val (when (and key-node (= :const (:op key-node)))
-                    (:val key-node))]
-      (when-let [vt (map-get-type coll-type key-val)]
-        [vt ctx]))
-
-    clojure.core/nth
-    (when-let [et (coll-nth-type (first arg-types))]
-      [et ctx])
-
-    ;; default — not special
-    nil))
-
 (defmethod infer-node :invoke [node ctx]
   (let [fn-node (:fn node)
         [arg-types ctx'] (infer-args (:args node) ctx)
-        ;; Try special-case dispatch first
         var-sym (when (= :var (:op fn-node))
                   (-> fn-node :var symbol))
-        special (when var-sym
-                  (special-invoke var-sym arg-types (:args node) ctx'))
-        ;; Resolve the function type
-        fn-type (when-not special
+        ;; Look up stub fn: from globals (inline annotation) or core stubs
+        stub-fn (when var-sym
+                  (let [g (ctx/lookup-global ctx' var-sym)]
+                    (if (fn? g)
+                      g
+                      (stubs/lookup-stub var-sym))))
+        ;; Fall back to fn type from globals or local binding
+        fn-type (when-not stub-fn
                   (case (:op fn-node)
-                    :var (or (ctx/lookup-global ctx' var-sym)
-                             (stubs/lookup-stub var-sym))
+                    :var (let [g (ctx/lookup-global ctx' var-sym)]
+                           (when (t/fn-type? g) g))
                     :local (let [t (ctx/lookup-binding ctx' (:name fn-node))]
                              (when (and t (t/fn-type? t)) t))
                     nil))]
     (cond
-      special special
+      stub-fn (stub-fn arg-types (:args node) ctx')
       (and fn-type (t/fn-type? fn-type))
-      (apply-fn-type ctx' fn-type arg-types (:args node))
+      (check/apply-fn-type ctx' fn-type arg-types (:args node))
       :else [:any ctx'])))
-
-(defn- special-static-call
-  "Handle RT.get / RT.nth static calls from destructuring expansion.
-   Returns [type ctx] or nil."
-  [class method arg-types arg-nodes ctx]
-  (let [class-name (if (class? class) (.getName ^Class class) (str class))
-        method-name (str method)]
-    (case [class-name method-name]
-      ["clojure.lang.RT" "get"]
-      (let [coll-type (first arg-types)
-            key-node (second arg-nodes)
-            key-val (when (and key-node (= :const (:op key-node)))
-                      (:val key-node))]
-        (when-let [vt (map-get-type coll-type key-val)]
-          [vt ctx]))
-
-      ["clojure.lang.RT" "nth"]
-      (when-let [et (coll-nth-type (first arg-types))]
-        [et ctx])
-
-      ;; default
-      nil)))
 
 (defmethod infer-node :static-call [node ctx]
   (let [[arg-types ctx'] (infer-args (:args node) ctx)
-        special (special-static-call (:class node) (:method node)
-                                     arg-types (:args node) ctx')
-        fn-type (when-not special
-                  (stubs/lookup-static (:class node) (:method node)))]
+        stub-fn (stubs/lookup-static (:class node) (:method node))]
     (cond
-      special special
-      (and fn-type (t/fn-type? fn-type))
-      (apply-fn-type ctx' fn-type arg-types (:args node))
+      (fn? stub-fn) (stub-fn arg-types (:args node) ctx')
+      (t/fn-type? stub-fn) (check/apply-fn-type ctx' stub-fn arg-types (:args node))
       :else [(or (t/tag->type (:tag node)) :any) ctx'])))
 
 (defmethod infer-node :keyword-invoke [node ctx]
@@ -370,7 +250,7 @@
         target-node (:target node)
         [target-type ctx'] (infer-node target-node ctx)
         kw (:val kw-node)]
-    (if-let [vt (map-get-type target-type kw)]
+    (if-let [vt (check/map-get-type target-type kw)]
       [vt ctx']
       [:any ctx'])))
 
@@ -409,12 +289,20 @@
 ;; --- Definitions ---
 
 (defmethod infer-node :def [node ctx]
-  (let [[init-type ctx'] (if (:init node)
+  (let [;; Check for inline annotation {:typura/sig [:=> ...]}
+        var-meta (meta (:var node))
+        typura-sig (:typura/sig var-meta)
+        ;; Infer body (even with annotation, for internal error checking)
+        [init-type ctx'] (if (:init node)
                            (infer-node (:init node) ctx)
                            [:any ctx])
         var-sym (-> node :var symbol)
-        ctx'' (ctx/extend-global ctx' var-sym init-type)]
-    [init-type ctx'']))
+        ;; Annotation overrides inferred type: store stub fn in globals
+        global-val (if (and typura-sig (t/fn-type? typura-sig))
+                     (stubs/sig typura-sig)
+                     init-type)
+        ctx'' (ctx/extend-global ctx' var-sym global-val)]
+    [(or typura-sig init-type) ctx'']))
 
 ;; --- Other nodes (Phase 0 stubs) ---
 
