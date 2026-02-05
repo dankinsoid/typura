@@ -242,7 +242,7 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] Capability satisfaction in `subtype?` for vectors, maps, sets, keywords
 - [x] Java interop: `class->type` mapping, improved `:instance-call`/`:new`/`:static-call`
 - [x] `RT/get`, `RT/nth` static call dispatch (used by macro-expanded destructuring)
-- [ ] **Destructuring analysis** — deferred to Phase 6 (see note below)
+- [ ] **Destructuring analysis** — deferred to Phase 6c (see note below)
 
 > **Destructuring limitation:** Clojure's destructuring macros expand to
 > `(let* [map__0 m, map__1 (if (seq? map__0) (apply hash-map ...) map__0), x (RT/get map__1 :x)] x)`.
@@ -259,23 +259,24 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [ ] Record definitions → typed map schemas
 - [ ] Multimethod dispatch tracking and coverage warnings
 
-### Phase 5 — LSP + CLI
-- [ ] CLI: `clj -M:typura check src/`
-- [ ] LSP server for real-time editor feedback
-- [ ] **Diagnostic output** — human-readable (with source snippets + underlines), EDN, JSON
-- [ ] LSP `textDocument/publishDiagnostics` — map internal diagnostics to LSP protocol
-- [ ] **Hover documentation** — enrich `textDocument/hover` with inferred type signatures
-  - Show inferred arg/return types for functions (even without annotations)
-  - Show narrowed type in context (e.g. after guard, inside branch)
-  - Augment existing docstrings with type info, don't replace them
-- [ ] Incremental analysis with file-level caching
+### Phase 5 — Project-Level Analysis
+Focus: transition from single-expression analysis to whole-project analysis.
 
-### Phase 6 — Hook System & Stubs (in progress)
+- [ ] **Namespace resolution** — parse `ns` forms, resolve `:require`/`:use`/`:import`/`:refer`
+- [ ] **Source discovery** — find `.clj`/`.cljs`/`.cljc` files from configured source paths
+- [ ] **Dependency graph** — build namespace dependency DAG, detect cycles
+- [ ] **Topological analysis** — analyze namespaces in dependency order
+- [ ] **Cross-namespace globals** — types inferred in ns A available when analyzing ns B via `:require`
+- [ ] **Classpath dependencies** — resolve types from JARs (stubs or reflection)
+- [ ] **Incremental analysis** — cache results per-namespace, invalidate on file change + transitive dependents
+- [ ] **Error recovery** — partial analysis of broken/incomplete files, graceful degradation (critical for LSP)
+- [ ] **Project configuration** — `.typura/config.edn` (source paths, excluded namespaces, stub paths, tags)
+
+### Phase 6 — Unified Functional Stubs ✅
 Every stub is a function `(fn [arg-types arg-nodes ctx] -> [ret-type ctx'])`.
 Helper `sig` creates these from Malli schemas; complex stubs are hand-written fns.
 Same mechanism for external stubs and inline annotations.
 
-**Done:**
 - [x] **Unified functional stubs** — stubs are functions, not fixed schemas
   - `sig` helper wraps `[:=> ...]` into a stub fn (with schema in metadata)
   - `sig+guard` attaches flow-narrowing guards as fn metadata
@@ -287,7 +288,10 @@ Same mechanism for external stubs and inline annotations.
   - All dispatch goes through stub functions (data-driven, not hardcoded)
   - `typura.check` namespace extracted for shared type-checking utilities
 
-**Remaining:**
+### Phase 6a — Inferred Stubs (parametric polymorphism)
+Focus: `defn` without annotation produces a callable stub, enabling polymorphic inference.
+Cross-namespace constraint propagation is unlimited — inferred stubs follow call chains across namespaces.
+
 - [ ] **Inferred function stubs** — `defn` without annotation produces a stub, not a static schema
   - `:fn` handler returns a stub fn closed over the fn's AST (params + body)
   - On each call site: binds params to concrete arg-types, infers body, returns result type
@@ -295,27 +299,38 @@ Same mechanism for external stubs and inline annotations.
   - `:invoke` handler checks `fn?` for local bindings (not just `fn-type?`)
   - `:def` handler skips body analysis when external stub already exists for the var
   - Metadata on stub fn carries the "general" schema for display (LSP hover, diagnostics)
-- [ ] Helper function library (typura core API for stub authors)
-- [ ] **Hook/stub loading via eval** — load `.typura/hooks/*.clj` as regular Clojure files
-  - `require`/`load-file` in the analyzer's JVM — full access to classpath (Malli, user deps)
-  - `analyze+eval` already evals top-level forms — var values available via `deref`
-  - User stubs override built-in stubs (user > built-in priority)
-- [ ] Hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
+
+### Phase 6b — Generics & Core Stubs
+Focus: expand type vocabulary and coverage. Can proceed after 6a stabilizes stub format.
+
+- [ ] Schema constructors for generics (`(Array :int)` → `[:vector :int]`)
 - [ ] Expand core stubs to ~50 most-used functions
-- [ ] Schema constructors for generics
-- [ ] Tag-based rule filtering
-- [ ] **Deep Java interop** — fully leverage tools.analyzer.jvm reflection data
-  - `class->type` for unknown classes: return the class itself as type (e.g. `java.util.ArrayList`) instead of `:any`
-  - `:instance-call` — when `:validated? true`, check argument types against Java method signature from reflection
-  - `:static-call` — same, use reflection data as fallback when no stub exists
-  - `subtype?` for Java classes: use `.isAssignableFrom` for class hierarchy
 - [ ] **Mutable references** — `atom`, `ref`, `volatile!`, `agent` typed as `:any` by default
   - `deref` / `@` returns `:any` unless annotated
   - Explicit annotation: `(atom ^{:typura/type :int} 0)` → `deref` returns `:int`, `reset!` checks value type
   - `swap!` checks that fn return type matches annotated type (when annotated)
   - No automatic inner type tracking — mutation makes static tracking unsound
 
-### Phase 7 — Literal Types & Tuples
+### Phase 6c — Hook System & Extensibility
+Focus: plugin system for external stubs and custom rules. Can proceed after 6a.
+
+- [ ] Helper function library (typura core API for stub authors)
+- [ ] **Hook/stub loading via eval** — load `.typura/hooks/*.clj` as regular Clojure files
+  - `require`/`load-file` in the analyzer's JVM — full access to classpath (Malli, user deps)
+  - `analyze+eval` already evals top-level forms — var values available via `deref`
+  - User stubs override built-in stubs (user > built-in priority)
+- [ ] Hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
+- [ ] Tag-based rule filtering
+
+### Phase 6d — Deep Java Interop
+Focus: fully leverage tools.analyzer.jvm reflection data. Independent of 6b/6c.
+
+- [ ] `class->type` for unknown classes: return the class itself as type (e.g. `java.util.ArrayList`) instead of `:any`
+- [ ] `:instance-call` — when `:validated? true`, check argument types against Java method signature from reflection
+- [ ] `:static-call` — same, use reflection data as fallback when no stub exists
+- [ ] `subtype?` for Java classes: use `.isAssignableFrom` for class hierarchy
+
+### Phase 7 — Literal Types, Tuples & Advanced Type Features
 - [ ] **Literal (value) types** — `[:val x]` represents the type of a specific constant value
   - `val->type` returns `[:val x]` instead of `:int` / `:keyword` / etc.
   - `subtype?`: `[:val 0]` ⊂ `:int` ⊂ `:number`, `[:val :red]` ⊂ `:keyword`
@@ -327,15 +342,43 @@ Same mechanism for external stubs and inline annotations.
   - `nth` on tuple with literal index returns positional type: `(nth [:tuple :int :string] [:val 0])` → `:int`
   - Not inferred automatically from vector literals (vector stays `[:vector [:or ...]]`)
   - Available via annotations and stubs
+- [ ] **Recursive types** — via Malli `:ref` (trees, linked lists, nested structures)
+- [ ] **Intersection types** — schema merging (`[:and TypeA TypeB]`)
+  - Useful for narrowing: guard + existing type = intersection
+  - `subtype?`: `[:and A B]` ⊂ `A` and `[:and A B]` ⊂ `B`
 - [ ] Update `simplify-union` — if union contains `:any`, collapse to `:any`
 
-### Open Questions
-- Recursive types (trees, linked lists) — Malli `:ref` + inference? - yes
-- Constants as types (TypeScript-style literal types)? - yes, planned in Phase 7
-- How deep to go with cross-namespace constraint propagation? - unclear yet, likely unlimited
-- Schema merging / intersection types? - yes
+### Phase 8 — LSP + CLI
+Depends on Phase 5 (project-level analysis).
+
+- [ ] CLI: `clj -M:typura check src/`
+- [ ] LSP server for real-time editor feedback
+- [ ] **Diagnostic output** — human-readable (with source snippets + underlines), EDN, JSON
+- [ ] LSP `textDocument/publishDiagnostics` — map internal diagnostics to LSP protocol
+- [ ] **Hover documentation** — enrich `textDocument/hover` with inferred type signatures
+  - Show inferred arg/return types for functions (even without annotations)
+  - Show narrowed type in context (e.g. after guard, inside branch)
+  - Augment existing docstrings with type info, don't replace them
+- [ ] **Suppression** — `^:typura/ignore` on forms, `; typura-ignore-next-line`, configurable severity levels
+- [ ] **Baseline mode** — snapshot current errors, report only new ones (for gradual adoption)
+
+### Phase 9 — VSCode Extension
+Depends on Phase 8 (LSP server).
+
+- [ ] Language client wrapping typura LSP
+- [ ] Extension config UI (source paths, severity levels, tags)
+- [ ] Marketplace publishing
+
+### Phase 10 — CI & Distribution
+- [ ] **CI mode** — `--diff-only` (errors in changed code only), `--baseline` support, exit codes
+- [ ] **GitHub Action** — reusable action for PR checks
+- [ ] Pre-commit hook support
+- [ ] Distribution: Clojars artifact, `clj -Ttools install`, brew formula
+- [ ] Dogfooding on real projects (ring, compojure, re-frame) — tune false positives, expand stubs
 
 ### Future TODO
+- **Emacs package** — lsp-mode/eglot integration, MELPA recipe
+- **IntelliJ/Cursive** — via LSP if Cursive supports it
 - **ClojureScript Support**
   - Abstract analyzer interface — decouple from tools.analyzer.jvm
   - tools.analyzer.js backend for CLJS
