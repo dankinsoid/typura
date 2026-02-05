@@ -1,8 +1,7 @@
 (ns typura.check
   "Shared type-checking utilities used by both stubs and inference."
   (:require [typura.types :as t]
-            [typura.context :as ctx]
-            [typura.subtype :as sub]))
+            [typura.context :as ctx]))
 
 (defn node->loc
   "Extract source location from an AST node."
@@ -66,21 +65,28 @@
 
 (defn map-get-type
   "Extract value type from a map type for a given keyword key.
-   Handles unions by checking each member."
-  [coll-type key-val]
-  (cond
-    (and (t/map-type? coll-type) (keyword? key-val))
-    (some (fn [entry] (when (= key-val (first entry)) (second entry)))
-          (rest coll-type))
+   Handles unions by checking each member.
+   When ctx is provided, resolves Class types (records) via record registry."
+  ([coll-type key-val] (map-get-type coll-type key-val nil))
+  ([coll-type key-val ctx]
+   (cond
+     ;; User-defined type (record symbol) → look up structural map from context
+     (and (t/user-type? coll-type) ctx)
+     (when-let [rec (ctx/lookup-record ctx coll-type)]
+       (map-get-type (:map-type rec) key-val ctx))
 
-    (t/map-of-type? coll-type)
-    (nth coll-type 2)
+     (and (t/map-type? coll-type) (keyword? key-val))
+     (some (fn [entry] (when (= key-val (first entry)) (second entry)))
+           (rest coll-type))
 
-    ;; Union: try each member, return first match
-    (t/union-type? coll-type)
-    (some #(map-get-type % key-val) (rest coll-type))
+     (t/map-of-type? coll-type)
+     (nth coll-type 2)
 
-    :else nil))
+     ;; Union: try each member, return first match
+     (t/union-type? coll-type)
+     (some #(map-get-type % key-val ctx) (rest coll-type))
+
+     :else nil)))
 
 (defn coll-nth-type
   "Extract element type from a vector type."

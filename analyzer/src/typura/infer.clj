@@ -5,6 +5,12 @@
             [typura.check :as check]
             [typura.subtype :as sub]))
 
+(defn var->sym
+  "Convert a Var to a clean qualified symbol.
+   (symbol (str var)) produces '#'ns/name with a #' prefix — this avoids that."
+  [^clojure.lang.Var v]
+  (symbol (str (.name (.ns v))) (str (.sym v))))
+
 (defn- simplify-union
   "Subtype-aware union normalization: remove members subsumed by others."
   [t]
@@ -90,7 +96,7 @@
     [tp ctx]))
 
 (defmethod infer-node :var [node ctx _expected]
-  (let [var-sym (-> node :var symbol)
+  (let [var-sym (var->sym (:var node))
         global (ctx/lookup-global ctx var-sym)
         tp (cond
              ;; Global is a stub fn → extract its advertised schema
@@ -157,7 +163,7 @@
         (when (and (= :var (:op fn-node))
                    (= 1 (count args))
                    (= :local (:op (first args))))
-          (let [var-sym (-> fn-node :var symbol)
+          (let [var-sym (var->sym (:var fn-node))
                 guard (stubs/lookup-guard var-sym)]
             (when (and guard (= 0 (:arg guard)))
               {:sym (:name (first args))
@@ -240,7 +246,7 @@
 (defmethod infer-node :invoke [node ctx _expected]
   (let [fn-node (:fn node)
         var-sym (when (= :var (:op fn-node))
-                  (-> fn-node :var symbol))
+                  (var->sym (:var fn-node)))
         ;; Look up stub fn: from globals (inline annotation) or core stubs
         stub-fn (when var-sym
                   (let [g (ctx/lookup-global ctx var-sym)]
@@ -286,7 +292,7 @@
         target-node (:target node)
         [target-type ctx'] (infer-node target-node ctx nil)
         kw (:val kw-node)]
-    (if-let [vt (check/map-get-type target-type kw)]
+    (if-let [vt (check/map-get-type target-type kw ctx')]
       [vt ctx']
       [:any ctx'])))
 
@@ -331,16 +337,25 @@
 ;; --- Definitions ---
 
 (defmethod infer-node :def [node ctx _expected]
-  (let [;; Check for inline annotation {:typura/sig [:=> ...]}
-        var-meta (meta (:var node))
+  (let [the-var (:var node)
+        var-meta (meta the-var)
+        var-sym (var->sym the-var)
         typura-sig (:typura/sig var-meta)
+        ;; Protocol method detection: var has :protocol in metadata
+        protocol-var (:protocol var-meta)
+        ;; Safe deref for protocol def / multimethod detection
+        var-val (try (when (and (bound? the-var) (nil? protocol-var))
+                       (deref the-var))
+                     (catch Exception _ nil))
+        is-protocol-def (and (map? var-val) (:sigs var-val) (:on var-val))
+        is-multimethod (instance? clojure.lang.MultiFn var-val)
         ;; Push annotation as expected to :fn child for bidirectional inference
         fn-expected (when (and typura-sig (t/fn-type? typura-sig))
                       typura-sig)
-        [init-type ctx'] (if (:init node)
+        ;; Infer init (skip for protocol method defs — init is dispatch machinery)
+        [init-type ctx'] (if (and (:init node) (nil? protocol-var))
                            (infer-node (:init node) ctx fn-expected)
                            [:any ctx])
-        var-sym (-> node :var symbol)
         ;; Check return type mismatch when annotated
         ctx'' (if (and fn-expected (t/fn-type? init-type))
                 (let [declared-ret (nth typura-sig 2)
@@ -358,12 +373,83 @@
                        :expected declared-ret
                        :actual actual-ret})))
                 ctx')
-        ;; Annotation overrides inferred type: store stub fn in globals
-        global-val (if (and typura-sig (t/fn-type? typura-sig))
+        ;; Existing stub in globals (e.g., factory stub from :deftype)
+        existing-global (ctx/lookup-global ctx'' var-sym)
+        ;; Build global-val with protocol/multimethod awareness
+        global-val (cond
+                     ;; Explicit annotation always wins
+                     (and typura-sig (t/fn-type? typura-sig))
                      (stubs/sig typura-sig)
-                     init-type)
-        ctx''' (ctx/extend-global ctx'' var-sym global-val)]
+                     ;; Protocol method: stub with protocol symbol as first param
+                     protocol-var
+                     (let [proto-name (var->sym protocol-var)
+                           arglists (:arglists var-meta)
+                           arity (count (first arglists))
+                           param-types (into [:cat proto-name]
+                                             (repeat (dec arity) :any))]
+                       (stubs/sig [:=> param-types :any]))
+                     ;; Multimethod: variadic any→any stub
+                     is-multimethod
+                     (stubs/sig [:=> [:cat [:* :any]] :any])
+                     ;; Preserve existing stub (e.g., factory from :deftype)
+                     (fn? existing-global)
+                     existing-global
+                     ;; Default: inferred type
+                     :else init-type)
+        ;; Register protocol definition in context
+        ctx''' (if is-protocol-def
+                 (let [methods-info (into {}
+                                     (map (fn [[k v]]
+                                            [k {:arglists (:arglists v)}])
+                                          (:sigs var-val)))
+                       proto-iface (:on-interface var-val)]
+                   (-> (ctx/extend-global ctx'' var-sym global-val)
+                       (ctx/register-protocol var-sym
+                         {:methods methods-info
+                          :interface proto-iface})
+                       (ctx/register-interface-mapping proto-iface var-sym)))
+                 (ctx/extend-global ctx'' var-sym global-val))]
     [(or typura-sig init-type) ctx''']))
+
+;; --- Protocols, Records, Multimethods (Phase 4) ---
+
+(defmethod infer-node :deftype [node ctx _expected]
+  ;; Registration done in Pass 1 (collect-declarations). Here we only walk
+  ;; method bodies for diagnostics.
+  (let [ctx' (reduce (fn [c method-node]
+                       (let [mc (reduce (fn [mc p]
+                                          (ctx/extend-binding mc (:name p) :any))
+                                        c (:params method-node))
+                             [_ mc'] (infer-node (:body method-node) mc nil)]
+                         (assoc c :diagnostics (:diagnostics mc'))))
+                     ctx (:methods node))]
+    [:any ctx']))
+
+(defmethod infer-node :method [node ctx expected]
+  (infer-node (:body node) ctx expected))
+
+(defmethod infer-node :protocol-invoke [node ctx _expected]
+  (let [proto-fn-node (:protocol-fn node)
+        the-var (when (= :var (:op proto-fn-node)) (:var proto-fn-node))
+        var-sym (when the-var (var->sym the-var))
+        ;; Look up stub from globals, core stubs, or derive from protocol metadata
+        stub-fn (when var-sym
+                  (or (let [g (ctx/lookup-global ctx var-sym)]
+                        (when (fn? g) g))
+                      (stubs/lookup-stub var-sym)
+                      (when-let [proto-var (:protocol (meta the-var))]
+                        (let [proto-name (var->sym proto-var)
+                              arity (count (first (:arglists (meta the-var))))
+                              params (into [:cat proto-name]
+                                           (repeat (dec arity) :any))]
+                          (stubs/sig [:=> params :any])))))
+        [target-type ctx'] (infer-node (:target node) ctx nil)
+        [arg-types ctx''] (infer-args (:args node) ctx')
+        all-arg-types (into [target-type] arg-types)
+        all-arg-nodes (into [(:target node)] (:args node))]
+    (if (fn? stub-fn)
+      (stub-fn all-arg-types all-arg-nodes ctx'')
+      [:any ctx''])))
 
 ;; --- Other nodes (Phase 0 stubs) ---
 

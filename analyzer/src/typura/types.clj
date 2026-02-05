@@ -164,6 +164,11 @@
   [t]
   (instance? Class t))
 
+(defn user-type?
+  "Qualified symbol used as type for user-defined records/protocols."
+  [t]
+  (and (symbol? t) (some? (namespace t))))
+
 (def nothing-schema
   "Bottom type (Never) — no values inhabit this type."
   (m/-simple-schema {:type :nothing

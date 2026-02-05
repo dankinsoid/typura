@@ -25,7 +25,7 @@
         key-node (second arg-nodes)
         key-val (when (and key-node (= :const (:op key-node)))
                   (:val key-node))]
-    (if-let [vt (check/map-get-type coll-type key-val)]
+    (if-let [vt (check/map-get-type coll-type key-val ctx)]
       [vt ctx]
       [:any ctx])))
 

@@ -303,3 +303,73 @@
                       (if flag "yes" "no")))]
       (is (empty? (:diagnostics result))))))
 
+;; --- Phase 4: Protocols, Records, Multimethods ---
+
+(deftest defrecord-factory-type
+  (testing "->Foo positional factory returns record symbolic type"
+    (let [result (sut/analyze-form
+                   '(do (defrecord Point4test [x y])
+                        (->Point4test 1 2)))]
+      (is (symbol? (:type result)))
+      (is (some? (namespace (:type result))))
+      (is (empty? (:diagnostics result))))))
+
+(deftest defrecord-keyword-access
+  (testing "keyword access on record returns field type"
+    (let [result (sut/analyze-form
+                   '(do (defrecord Person4test [name age])
+                        (:name (->Person4test "Alice" 30))))]
+      (is (= :any (:type result))))))
+
+(deftest defprotocol-method-call
+  (testing "protocol method call returns :any, no diagnostics"
+    (let [result (sut/analyze-form
+                   '(do (defprotocol Greetable4test
+                          (greet4test [this]))
+                        (greet4test "obj")))]
+      (is (= :any (:type result))))))
+
+(deftest protocol-compliance
+  (testing "no diagnostic when record implements the protocol"
+    (let [result (sut/analyze-form
+                   '(do (defprotocol Speakable4test
+                          (speak4test [this]))
+                        (defrecord Speaker4test []
+                          Speakable4test
+                          (speak4test [this] "hello"))
+                        (speak4test (->Speaker4test))))]
+      (is (empty? (:diagnostics result))))))
+
+(deftest protocol-violation
+  (testing "diagnostic when record doesn't implement the protocol"
+    (let [result (sut/analyze-form
+                   '(do (defprotocol Flyable4test
+                          (fly4test [this]))
+                        (defrecord Bird4test []
+                          Flyable4test
+                          (fly4test [this] "soaring"))
+                        (defrecord Car4test [brand])
+                        (fly4test (->Car4test "Toyota"))))]
+      (is (pos? (count (:diagnostics result))))
+      (is (= :type-mismatch (:code (first (:diagnostics result))))))))
+
+(deftest defrecord-with-protocol-no-crash
+  (testing "defrecord implementing protocol doesn't crash"
+    (let [result (sut/analyze-form
+                   '(do (defprotocol Runnable4test
+                          (run-it4test [this]))
+                        (defrecord Task4test [name]
+                          Runnable4test
+                          (run-it4test [this] (str "Running " name)))))]
+      (is (some? result)))))
+
+(deftest multimethod-basic
+  (testing "defmulti + defmethod + call doesn't crash"
+    (let [result (sut/analyze-form
+                   '(do (defmulti area4test :shape)
+                        (defmethod area4test :circle [s]
+                          (* 3.14 (:radius s) (:radius s)))
+                        (area4test {:shape :circle :radius 5})))]
+      (is (= :any (:type result)))
+      (is (empty? (:diagnostics result))))))
+

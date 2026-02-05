@@ -3,10 +3,13 @@
             [typura.subtype :as sub]))
 
 (defn make-context []
-  {:bindings    {}
-   :globals     {}
-   :subst       {}
-   :diagnostics []})
+  {:bindings           {}
+   :globals            {}
+   :subst              {}
+   :diagnostics        []
+   :protocols          {}
+   :records            {}
+   :interface->protocol {}})
 
 (defn emit-diagnostic
   "Append a diagnostic to the context's accumulator."
@@ -31,6 +34,24 @@
 (defn lookup-global [ctx var-sym]
   (get-in ctx [:globals var-sym]))
 
+(defn register-protocol [ctx proto-sym proto-info]
+  (assoc-in ctx [:protocols proto-sym] proto-info))
+
+(defn lookup-protocol [ctx proto-sym]
+  (get-in ctx [:protocols proto-sym]))
+
+(defn extend-record [ctx type-sym record-info]
+  (assoc-in ctx [:records type-sym] record-info))
+
+(defn lookup-record [ctx type-sym]
+  (get-in ctx [:records type-sym]))
+
+(defn register-interface-mapping [ctx iface-class proto-sym]
+  (assoc-in ctx [:interface->protocol iface-class] proto-sym))
+
+(defn lookup-protocol-by-interface [ctx iface-class]
+  (get-in ctx [:interface->protocol iface-class]))
+
 (defn resolve-type
   "Follow tvar substitution chains to a concrete type."
   [ctx t]
@@ -48,6 +69,8 @@
     (cond
       (t/tvar? t) t
       (keyword? t) t
+      (class? t) t
+      (t/user-type? t) t
       (and (vector? t) (= :=> (first t)))
       (let [ret (nth t 2)]
         [:=> (resolve-deep ctx (second t))
@@ -72,7 +95,8 @@
   "Bind or narrow a tvar. If already bound, narrows to more specific type.
    Returns updated ctx, or nil on incompatible constraint."
   [ctx tvar-id new-type]
-  (let [existing (get-in ctx [:subst tvar-id])]
+  (let [existing (get-in ctx [:subst tvar-id])
+        registry (:records ctx)]
     (cond
       (nil? existing)
       (assoc-in ctx [:subst tvar-id] new-type)
@@ -80,10 +104,10 @@
       (= existing new-type)
       ctx
 
-      (sub/subtype? new-type existing)
+      (sub/subtype? new-type existing registry)
       (assoc-in ctx [:subst tvar-id] new-type)
 
-      (sub/subtype? existing new-type)
+      (sub/subtype? existing new-type registry)
       ctx
 
       :else nil)))
@@ -98,7 +122,8 @@
     (cond
       (= resolved-t resolved-exp) ctx
       (= resolved-exp :any) ctx
+      (= resolved-t :any) ctx
       (t/tvar? t)        (bind-tvar ctx (t/tvar-id t) resolved-exp)
       (t/tvar? expected) (bind-tvar ctx (t/tvar-id expected) resolved-t)
-      (sub/subtype? resolved-t resolved-exp) ctx
+      (sub/subtype? resolved-t resolved-exp (:records ctx)) ctx
       :else nil)))

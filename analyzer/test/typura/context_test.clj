@@ -82,3 +82,30 @@
                 (assoc-in [:subst (t/tvar-id tv2)] :string))]
     (is (= [:=> [:cat :number :string] :number]
            (sut/resolve-deep ctx [:=> [:cat tv1 tv2] tv1])))))
+
+;; --- Phase 4: Protocol and Record context ---
+
+(deftest protocol-context-test
+  (let [ctx (-> (sut/make-context)
+                (sut/register-protocol 'my.ns/MyProto
+                  {:methods {'my-method {:arglists '([this x])}}
+                   :interface Object}))]
+    (is (= {:methods {'my-method {:arglists '([this x])}}
+            :interface Object}
+           (sut/lookup-protocol ctx 'my.ns/MyProto)))
+    (is (nil? (sut/lookup-protocol ctx 'my.ns/Unknown)))))
+
+(deftest record-context-test
+  (let [ctx (-> (sut/make-context)
+                (sut/extend-record 'my.ns/MyRecord
+                  {:fields ['x 'y] :map-type [:map [:x :any] [:y :any]]
+                   :implements #{} :java-interfaces #{}}))]
+    (is (= {:fields ['x 'y] :map-type [:map [:x :any] [:y :any]]
+            :implements #{} :java-interfaces #{}}
+           (sut/lookup-record ctx 'my.ns/MyRecord)))
+    (is (nil? (sut/lookup-record ctx 'my.ns/Unknown)))))
+
+(deftest constrain-any-passthrough-test
+  (testing ":any actual passes silently (gradual typing)"
+    (is (some? (sut/constrain (sut/make-context) :any :number)))
+    (is (some? (sut/constrain (sut/make-context) :any String)))))

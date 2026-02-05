@@ -108,3 +108,37 @@
     (is (sut/subtype? :keyword IFn))
     (is (not (sut/subtype? :keyword ILookup)))
     (is (not (sut/subtype? :keyword Indexed)))))
+
+;; --- Phase 4: Symbolic user type hierarchy ---
+
+(deftest user-type-subtyping
+  (let [reg {'my.ns/Dog {:implements #{'my.ns/Animal}}
+             'my.ns/Cat {:implements #{'my.ns/Animal}}}]
+    (testing "user type implements protocol"
+      (is (sut/subtype? 'my.ns/Dog 'my.ns/Animal reg))
+      (is (sut/subtype? 'my.ns/Cat 'my.ns/Animal reg)))
+    (testing "user type does NOT implement unrelated protocol"
+      (is (not (sut/subtype? 'my.ns/Dog 'my.ns/Flyable reg))))
+    (testing "user type identity"
+      (is (sut/subtype? 'my.ns/Dog 'my.ns/Dog reg)))
+    (testing "user type <: :any"
+      (is (sut/subtype? 'my.ns/Dog :any reg)))
+    (testing "without registry: only equality"
+      (is (sut/subtype? 'my.ns/Dog 'my.ns/Dog))
+      (is (not (sut/subtype? 'my.ns/Dog 'my.ns/Animal))))))
+
+;; --- Phase 4: Java class hierarchy ---
+
+(deftest java-class-subtyping
+  (testing "class identity"
+    (is (sut/subtype? String String)))
+  (testing "class hierarchy"
+    (is (sut/subtype? String Object))
+    (is (not (sut/subtype? Object String)))
+    (is (sut/subtype? Long Number)))
+  (testing "class <: :any"
+    (is (sut/subtype? String :any)))
+  (testing "class implements interface"
+    (is (sut/subtype? clojure.lang.PersistentVector IFn))
+    (is (sut/subtype? clojure.lang.PersistentVector Indexed))
+    (is (sut/subtype? clojure.lang.PersistentArrayMap ILookup))))

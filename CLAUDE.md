@@ -345,13 +345,14 @@ Focus: plugin system for external stubs and custom rules. Can proceed after 6a.
 - [ ] Hook API 
 - [ ] Tag-based rule filtering
 
-### Phase 6d — Deep Java Interop
-Focus: fully leverage tools.analyzer.jvm reflection data. Independent of 6b/6c.
+### Phase 6d — Deep Java Interop & Type Hints
+Focus: fully leverage tools.analyzer.jvm reflection data and Clojure type hints. Independent of 6b/6c.
 
 - [ ] `class->type` for unknown classes: return the class itself as type (e.g. `java.util.ArrayList`) instead of `:any`
 - [ ] `:instance-call` — when `:validated? true`, check argument types against Java method signature from reflection
 - [ ] `:static-call` — same, use reflection data as fallback when no stub exists
 - [ ] `subtype?` for Java classes: use `.isAssignableFrom` for class hierarchy
+- [ ] **Type hints as type source** — read `^Type` metadata from AST nodes
 
 ### Phase 6e — Malli Validation Narrowing
 Focus: recognize `m/validate` calls and narrow types from Malli schemas. Hardcoded integration
@@ -392,6 +393,9 @@ opaque EDN vectors with hand-written pattern matching. Instead, use Malli's own 
 - [ ] Update `simplify-union` — if union contains `:any`, collapse to `:any`
 
 ### Phase 7 — Literal Types & Advanced Type Features
+- [ ] **Research: occurrence typing** — study formal proposition system from Typed Racket / Typed Clojure
+  - Read Tobin-Hochstadt & Felleisen "Logical Types for Untyped Languages" (ICFP 2010)
+  - Decision: adopt full proposition system, extend guards incrementally, or stay with current approach
 - [ ] **Literal (value) types** — `[:val x]` represents the type of a specific constant value
   - `val->type` returns `[:val x]` instead of `:int` / `:keyword` / etc.
   - `subtype?`: `[:val 0]` ⊂ `:int` ⊂ `:number`, `[:val :red]` ⊂ `:keyword`
