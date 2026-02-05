@@ -234,32 +234,25 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] **`:type-mismatch`** — argument type vs parameter type conflict detection (fixed & variadic params)
 - [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings (deferred)
 
-### Phase 2b — Bidirectional Inference & Constraint Accumulation
-Focus: make inference truly bidirectional. Currently `infer-node` is pure synthesis (bottom-up).
-Add expected-type propagation (top-down) and fix tvar constraint accumulation.
-
-**Core change:** `infer-node` signature becomes `[node ctx expected] → [type ctx']`
+### Phase 2b — Bidirectional Inference & Constraint Accumulation ✅
+Focus: make inference truly bidirectional. `infer-node` signature is `[node ctx expected] → [type ctx']`
 where `expected` is `nil` (synthesis mode) or a type (checking mode).
 
-- [ ] **Expected-type parameter** — thread expected type through the AST walker
-  - `:do` — push expected into last expression (`:ret`)
-  - `:let` — push expected into body
-  - `:if` — push expected into both branches (enables earlier conflict detection)
-  - `:fn` — when expected is `[:=> [:cat P1 P2] R]`, bind params to `P1 P2` instead of fresh tvars,
-    push `R` into body. This is the key case: `(map (fn [x] ...) [1 2])` pushes `:int` into `x`
-  - `:invoke` — push param types as expected into arg expressions (currently done post-hoc via `constrain`)
-- [ ] **Constraint narrowing for tvars** — when tvar already bound, narrow instead of overwrite
+- [x] **Expected-type parameter** — thread expected type through the AST walker
+  - `:do`, `:let`, `:loop`, `:if`, `:with-meta`, `:try` push expected into child expressions
+  - `:fn` — when expected is `[:=> [:cat P1 P2] R]`, bind params to `P1 P2` (concrete, not tvars),
+    push `R` into body
+  - `:invoke` / `:static-call` — push param types from stubs as expected into arg expressions
+- [x] **Constraint narrowing for tvars** — `bind-tvar` narrows instead of overwriting
+  - **Only for inferred types** — narrowing applies to auto-inferred tvars, not user annotations.
+    Annotated params are concrete types (not tvars), so `subtype?` check applies strictly.
   - New constraint more specific (subtype of current): narrow
-  - Current more specific (subtype of new): keep, already satisfies
-  - Incompatible (neither is subtype): **conflict** → diagnostic
-  - Replaces current `(assoc-in ctx [:subst id] expected)` with intersection logic
-  - Example: `(+ x 1)` then `(bit-and x 3)` → `:number` narrowed to `:int` (not error)
-  - Example: `(+ x 1)` then `(count x)` → `:number` vs `:cap/counted` → conflict
-- [ ] **Return type checking** — verify function body against annotated return type
-  - `defn` with `{:typura/sig [:=> ...]}` → push declared return type as expected into body
-  - Emit `:return-type-mismatch` diagnostic on violation
-- [ ] **Multi-constraint tvars** — store constraint set per tvar instead of single type
-  - Resolve to intersection at use point, detect empty intersection as conflict
+  - Current more specific (subtype of new): keep
+  - Incompatible: return nil → conflict diagnostic
+- [x] **Return type checking** — `:def` pushes annotation as expected to `:fn` child
+  - Emits `:return-type-mismatch` diagnostic when body return type conflicts with declared type
+- [ ] **Multi-constraint tvars** — store constraint set per tvar instead of single type (deferred to Phase 7)
+  - Currently uses single narrowest type via `bind-tvar`; full `[:and ...]` intersection needs Phase 7
 
 ### Phase 3 — Clojure Core Abstractions & Interop ✅
 - [x] Typed collection literals: `[:vector T]`, `[:set T]`, `[:map [:k T] ...]`, `[:map-of K V]`

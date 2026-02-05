@@ -230,16 +230,76 @@
     ;; Define an annotated function, then call it
     (let [result (sut/analyze-form
                    '(do (defn ^{:typura/sig [:=> [:cat :int :string] :number]}
-                          my-fn [a b] nil)
+                          my-fn [a b] (+ a 1))
                         (my-fn 1 "hello")))]
       (is (= :number (:type result)))
       (is (empty? (:diagnostics result)))))
   (testing "defn annotation produces type-mismatch on wrong args"
     (let [result (sut/analyze-form
                    '(do (defn ^{:typura/sig [:=> [:cat :int :string] :number]}
-                          my-fn2 [a b] nil)
+                          my-fn2 [a b] (+ a 1))
                         (my-fn2 "wrong" 42)))
           diags (:diagnostics result)]
       (is (= 2 (count diags)))
       (is (every? #(= :type-mismatch (:code %)) diags)))))
+
+;; --- Phase 2b: Bidirectional Inference & Constraint Accumulation ---
+
+(deftest tvar-constraint-narrowing
+  (testing "two constraints narrow: + gives :number, bit-and narrows to :int"
+    (is (= [:=> [:cat :int] :int]
+           (:type (sut/analyze-form
+                   '(fn [x] (do (+ x 1) (bit-and x 3))))))))
+  (testing "same constraint twice is stable"
+    (is (= [:=> [:cat :number] :number]
+           (:type (sut/analyze-form
+                   '(fn [x] (do (+ x 1) (inc x)))))))))
+
+(deftest declared-type-no-narrowing
+  (testing "annotated :number param + bit-and produces type-mismatch"
+    (let [result (sut/analyze-form
+                   '(defn ^{:typura/sig [:=> [:cat :number] :int]}
+                      f [x] (bit-and x 3)))
+          diags (:diagnostics result)]
+      (is (= 1 (count diags)))
+      (is (= :type-mismatch (:code (first diags))))
+      (is (= :int (:expected (first diags))))
+      (is (= :number (:actual (first diags)))))))
+
+(deftest return-type-mismatch-diagnostic
+  (testing "defn body return type conflicts with annotation"
+    (let [result (sut/analyze-form
+                   '(defn ^{:typura/sig [:=> [:cat :int] :string]}
+                      bad-fn [x] (+ x 1)))
+          diags (:diagnostics result)]
+      (is (= 1 (count diags)))
+      (is (= :return-type-mismatch (:code (first diags))))
+      (is (= :string (:expected (first diags))))
+      (is (= :number (:actual (first diags))))))
+  (testing "no diagnostic when return type matches"
+    (let [result (sut/analyze-form
+                   '(defn ^{:typura/sig [:=> [:cat :int] :number]}
+                      good-fn [x] (+ x 1)))]
+      (is (empty? (:diagnostics result)))))
+  (testing "no diagnostic when body returns :any"
+    (let [result (sut/analyze-form
+                   '(defn ^{:typura/sig [:=> [:cat :int] :string]}
+                      unknown-fn [x] (first [x])))]
+      (is (empty? (:diagnostics result))))))
+
+(deftest bidir-fn-arg-pushdown
+  (testing "fn arg receives expected param types from annotated caller"
+    (let [result (sut/analyze-form
+                   '(do (defn ^{:typura/sig [:=> [:cat [:=> [:cat :int] :string]] :string]}
+                          apply-fn [f] (f 1))
+                        (apply-fn (fn [x] (str x)))))]
+      (is (empty? (:diagnostics result))))))
+
+(deftest bidir-if-branches
+  (testing "expected type pushed through if branches"
+    (let [result (sut/analyze-form
+                   '(defn ^{:typura/sig [:=> [:cat :boolean] :string]}
+                      to-str [flag]
+                      (if flag "yes" "no")))]
+      (is (empty? (:diagnostics result))))))
 

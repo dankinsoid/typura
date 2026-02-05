@@ -97,6 +97,11 @@
    ["clojure.lang.Numbers" "incP"]            (sig [:=> [:cat :number] :number])
    ["clojure.lang.Numbers" "decP"]            (sig [:=> [:cat :number] :number])
 
+   ;; Bitwise operations
+   ["clojure.lang.Numbers" "and"]              (sig [:=> [:cat :int :int] :int])
+   ["clojure.lang.Numbers" "or"]               (sig [:=> [:cat :int :int] :int])
+   ["clojure.lang.Numbers" "xor"]              (sig [:=> [:cat :int :int] :int])
+
    ;; Destructuring support — RT methods and PersistentArrayMap factory
    ["clojure.lang.RT" "get"]                    resolve-get
    ["clojure.lang.RT" "nth"]                    resolve-nth

@@ -8,7 +8,7 @@
   [form]
   (let [ast (ana.jvm/analyze form)
         initial-ctx (ctx/make-context)
-        [inferred-type final-ctx] (infer/infer-node ast initial-ctx)]
+        [inferred-type final-ctx] (infer/infer-node ast initial-ctx nil)]
     {:type (ctx/resolve-deep final-ctx inferred-type)
      :diagnostics (ctx/get-diagnostics final-ctx)
      :ctx final-ctx}))

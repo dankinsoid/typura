@@ -68,17 +68,37 @@
       [:map-of (resolve-deep ctx (nth t 1)) (resolve-deep ctx (nth t 2))]
       :else t)))
 
+(defn- bind-tvar
+  "Bind or narrow a tvar. If already bound, narrows to more specific type.
+   Returns updated ctx, or nil on incompatible constraint."
+  [ctx tvar-id new-type]
+  (let [existing (get-in ctx [:subst tvar-id])]
+    (cond
+      (nil? existing)
+      (assoc-in ctx [:subst tvar-id] new-type)
+
+      (= existing new-type)
+      ctx
+
+      (sub/subtype? new-type existing)
+      (assoc-in ctx [:subst tvar-id] new-type)
+
+      (sub/subtype? existing new-type)
+      ctx
+
+      :else nil)))
+
 (defn constrain
   "Constrain a type to be a subtype of the expected type.
-   If t is a tvar, bind it. If concrete, check subtype.
+   If t is a tvar, bind/narrow it. If concrete, check subtype.
    Returns updated ctx or nil on failure."
   [ctx t expected]
-  (let [t (resolve-type ctx t)
-        expected (resolve-type ctx expected)]
+  (let [resolved-t (resolve-type ctx t)
+        resolved-exp (resolve-type ctx expected)]
     (cond
-      (= t expected) ctx
-      (= expected :any) ctx
-      (t/tvar? t) (assoc-in ctx [:subst (t/tvar-id t)] expected)
-      (t/tvar? expected) (assoc-in ctx [:subst (t/tvar-id expected)] t)
-      (sub/subtype? t expected) ctx
+      (= resolved-t resolved-exp) ctx
+      (= resolved-exp :any) ctx
+      (t/tvar? t)        (bind-tvar ctx (t/tvar-id t) resolved-exp)
+      (t/tvar? expected) (bind-tvar ctx (t/tvar-id expected) resolved-t)
+      (sub/subtype? resolved-t resolved-exp) ctx
       :else nil)))

@@ -47,6 +47,33 @@
   (testing "incompatible types return nil"
     (is (nil? (sut/constrain (sut/make-context) :string :number)))))
 
+(deftest constrain-narrowing-test
+  (testing "tvar narrowing: :number then :int narrows to :int"
+    (let [tv (t/fresh-tvar)
+          ctx (-> (sut/make-context)
+                  (sut/constrain tv :number)
+                  (sut/constrain tv :int))]
+      (is (some? ctx))
+      (is (= :int (sut/resolve-type ctx tv)))))
+  (testing "tvar narrowing: :int then :number keeps :int"
+    (let [tv (t/fresh-tvar)
+          ctx (-> (sut/make-context)
+                  (sut/constrain tv :int)
+                  (sut/constrain tv :number))]
+      (is (some? ctx))
+      (is (= :int (sut/resolve-type ctx tv)))))
+  (testing "incompatible constraints return nil"
+    (let [tv (t/fresh-tvar)
+          ctx (sut/constrain (sut/make-context) tv :number)]
+      (is (nil? (sut/constrain ctx tv :string)))))
+  (testing "same constraint twice is idempotent"
+    (let [tv (t/fresh-tvar)
+          ctx (-> (sut/make-context)
+                  (sut/constrain tv :int)
+                  (sut/constrain tv :int))]
+      (is (some? ctx))
+      (is (= :int (sut/resolve-type ctx tv))))))
+
 (deftest resolve-deep-test
   (let [tv1 (t/fresh-tvar)
         tv2 (t/fresh-tvar)

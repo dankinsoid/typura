@@ -34,10 +34,11 @@
     :else t))
 
 (defmulti infer-node
-  "Infer the type of an AST node. Returns [type, updated-ctx]."
-  (fn [node ctx] (:op node)))
+  "Infer the type of an AST node. Returns [type, updated-ctx].
+   `expected` is nil (synthesis) or a type (checking mode)."
+  (fn [node ctx expected] (:op node)))
 
-(defmethod infer-node :default [node ctx]
+(defmethod infer-node :default [node ctx _expected]
   [:any ctx])
 
 ;; --- Literals ---
@@ -66,7 +67,7 @@
                            (simplify-union (into [:or] v-types))])))
     :any))
 
-(defmethod infer-node :const [node ctx]
+(defmethod infer-node :const [node ctx _expected]
   (let [tp (case (:type node)
              :number  (t/val->type (:val node))
              :string  :string
@@ -82,13 +83,13 @@
 
 ;; --- Variables ---
 
-(defmethod infer-node :local [node ctx]
+(defmethod infer-node :local [node ctx _expected]
   (let [sym (:name node)
         tp (or (ctx/lookup-binding ctx sym)
                :any)]
     [tp ctx]))
 
-(defmethod infer-node :var [node ctx]
+(defmethod infer-node :var [node ctx _expected]
   (let [var-sym (-> node :var symbol)
         global (ctx/lookup-global ctx var-sym)
         tp (cond
@@ -101,38 +102,38 @@
                      (or (stubs/stub-schema sf) :any)))]
     [(or tp :any) ctx]))
 
-(defmethod infer-node :the-var [node ctx]
-  (infer-node (assoc node :op :var) ctx))
+(defmethod infer-node :the-var [node ctx expected]
+  (infer-node (assoc node :op :var) ctx expected))
 
 ;; --- Pass-through wrappers ---
 
-(defmethod infer-node :with-meta [node ctx]
-  (infer-node (:expr node) ctx))
+(defmethod infer-node :with-meta [node ctx expected]
+  (infer-node (:expr node) ctx expected))
 
-(defmethod infer-node :do [node ctx]
-  (let [ctx' (reduce (fn [c stmt] (second (infer-node stmt c)))
+(defmethod infer-node :do [node ctx expected]
+  (let [ctx' (reduce (fn [c stmt] (second (infer-node stmt c nil)))
                      ctx
                      (:statements node))]
-    (infer-node (:ret node) ctx')))
+    (infer-node (:ret node) ctx' expected)))
 
 ;; --- Bindings ---
 
-(defmethod infer-node :let [node ctx]
+(defmethod infer-node :let [node ctx expected]
   (let [ctx' (reduce (fn [c binding]
-                       (let [[init-type c'] (infer-node (:init binding) c)]
+                       (let [[init-type c'] (infer-node (:init binding) c nil)]
                          (ctx/extend-binding c' (:name binding) init-type)))
                      ctx
                      (:bindings node))]
-    (infer-node (:body node) ctx')))
+    (infer-node (:body node) ctx' expected)))
 
-(defmethod infer-node :loop [node ctx]
+(defmethod infer-node :loop [node ctx expected]
   ;; For Phase 0, treat loop like let (ignore recur)
   (let [ctx' (reduce (fn [c binding]
-                       (let [[init-type c'] (infer-node (:init binding) c)]
+                       (let [[init-type c'] (infer-node (:init binding) c nil)]
                          (ctx/extend-binding c' (:name binding) init-type)))
                      ctx
                      (:bindings node))]
-    (infer-node (:body node) ctx')))
+    (infer-node (:body node) ctx' expected)))
 
 ;; --- Conditionals ---
 
@@ -170,9 +171,9 @@
     (when (= :local (:op test-node))
       (:name test-node))))
 
-(defmethod infer-node :if [node ctx]
+(defmethod infer-node :if [node ctx expected]
   (let [test-node (:test node)
-        [_ ctx'] (infer-node test-node ctx)
+        [_ ctx'] (infer-node test-node ctx nil)
         guard (extract-guard-info test-node)
         test-local (extract-test-local test-node)
         ;; Build narrowed contexts for then/else branches
@@ -192,9 +193,9 @@
                      (ctx/extend-binding ctx' (:sym guard)
                                          (subtract-type-deep orig (:narrows guard))))
                    :else ctx')
-        [then-type _] (infer-node (:then node) then-ctx)
+        [then-type _] (infer-node (:then node) then-ctx expected)
         [else-type _] (if (:else node)
-                         (infer-node (:else node) else-ctx)
+                         (infer-node (:else node) else-ctx expected)
                          [:nil else-ctx])
         result-type (if (= then-type else-type)
                       then-type
@@ -207,54 +208,89 @@
   "Infer types of argument nodes. Returns [arg-types-vec, updated-ctx]."
   [args ctx]
   (reduce (fn [[types c] arg]
-            (let [[tp c'] (infer-node arg c)]
+            (let [[tp c'] (infer-node arg c nil)]
               [(conj types tp) c']))
           [[] ctx]
           args))
 
-(defmethod infer-node :invoke [node ctx]
+(defn- infer-args-with-expected
+  "Infer types of argument nodes with expected types pushed down.
+   `expected-types` is a seq of types parallel to args (may be shorter)."
+  [args expected-types ctx]
+  (reduce (fn [[types c] [arg exp]]
+            (let [[tp c'] (infer-node arg c exp)]
+              [(conj types tp) c']))
+          [[] ctx]
+          (map vector args (concat expected-types (repeat nil)))))
+
+(defn- extract-expected-arg-types
+  "Extract expected argument types from a fn schema for bidirectional pushdown.
+   Expands variadic tails to match the actual arg count."
+  [schema n-args]
+  (when schema
+    (let [cat (second schema)
+          raw-params (vec (rest cat))
+          last-p (peek raw-params)]
+      (if (and last-p (t/repeat-type? last-p))
+        (let [fixed (pop raw-params)
+              var-elem (second last-p)]
+          (into fixed (repeat (max 0 (- n-args (count fixed))) var-elem)))
+        raw-params))))
+
+(defmethod infer-node :invoke [node ctx _expected]
   (let [fn-node (:fn node)
-        [arg-types ctx'] (infer-args (:args node) ctx)
         var-sym (when (= :var (:op fn-node))
                   (-> fn-node :var symbol))
         ;; Look up stub fn: from globals (inline annotation) or core stubs
         stub-fn (when var-sym
-                  (let [g (ctx/lookup-global ctx' var-sym)]
+                  (let [g (ctx/lookup-global ctx var-sym)]
                     (if (fn? g)
                       g
                       (stubs/lookup-stub var-sym))))
         ;; Fall back to fn type from globals or local binding
         fn-type (when-not stub-fn
                   (case (:op fn-node)
-                    :var (let [g (ctx/lookup-global ctx' var-sym)]
+                    :var (let [g (ctx/lookup-global ctx var-sym)]
                            (when (t/fn-type? g) g))
-                    :local (let [t (ctx/lookup-binding ctx' (:name fn-node))]
+                    :local (let [t (ctx/lookup-binding ctx (:name fn-node))]
                              (when (and t (t/fn-type? t)) t))
-                    nil))]
+                    nil))
+        ;; Extract expected arg types for bidirectional pushdown
+        schema (or (when stub-fn (stubs/stub-schema stub-fn))
+                   (when (t/fn-type? fn-type) fn-type))
+        expected-arg-types (extract-expected-arg-types schema (count (:args node)))
+        ;; Infer args with expected types pushed down
+        [arg-types ctx'] (if expected-arg-types
+                           (infer-args-with-expected (:args node) expected-arg-types ctx)
+                           (infer-args (:args node) ctx))]
     (cond
       stub-fn (stub-fn arg-types (:args node) ctx')
       (and fn-type (t/fn-type? fn-type))
       (check/apply-fn-type ctx' fn-type arg-types (:args node))
       :else [:any ctx'])))
 
-(defmethod infer-node :static-call [node ctx]
-  (let [[arg-types ctx'] (infer-args (:args node) ctx)
-        stub-fn (stubs/lookup-static (:class node) (:method node))]
+(defmethod infer-node :static-call [node ctx _expected]
+  (let [stub-fn (stubs/lookup-static (:class node) (:method node))
+        schema (when (fn? stub-fn) (stubs/stub-schema stub-fn))
+        expected-arg-types (extract-expected-arg-types schema (count (:args node)))
+        [arg-types ctx'] (if expected-arg-types
+                           (infer-args-with-expected (:args node) expected-arg-types ctx)
+                           (infer-args (:args node) ctx))]
     (cond
       (fn? stub-fn) (stub-fn arg-types (:args node) ctx')
       (t/fn-type? stub-fn) (check/apply-fn-type ctx' stub-fn arg-types (:args node))
       :else [(or (t/tag->type (:tag node)) :any) ctx'])))
 
-(defmethod infer-node :keyword-invoke [node ctx]
+(defmethod infer-node :keyword-invoke [node ctx _expected]
   (let [kw-node (:keyword node)
         target-node (:target node)
-        [target-type ctx'] (infer-node target-node ctx)
+        [target-type ctx'] (infer-node target-node ctx nil)
         kw (:val kw-node)]
     (if-let [vt (check/map-get-type target-type kw)]
       [vt ctx']
       [:any ctx'])))
 
-(defmethod infer-node :instance-call [node ctx]
+(defmethod infer-node :instance-call [node ctx _expected]
   (let [[_ ctx'] (infer-args (:args node) ctx)
         tag (:tag node)]
     [(or (when (class? tag) (t/class->type tag))
@@ -264,69 +300,94 @@
 
 ;; --- Functions ---
 
-(defmethod infer-node :fn [node ctx]
+(defmethod infer-node :fn [node ctx expected]
   (let [method (first (:methods node))
         params (:params method)
-        ;; Fresh tvars for each param
-        param-tvars (mapv (fn [_] (t/fresh-tvar)) params)
-        ;; Bind params
-        ctx' (reduce (fn [c [param tvar]]
-                       (ctx/extend-binding c (:name param) tvar))
+        ;; Decompose expected fn type if present and arity matches
+        [expected-params expected-ret]
+        (when (and expected (t/fn-type? expected))
+          (let [param-types (vec (rest (second expected)))]
+            (when (= (count param-types) (count params))
+              [param-types (nth expected 2)])))
+        ;; Bind params: concrete from expected, or fresh tvars for inference
+        param-types (or expected-params
+                        (mapv (fn [_] (t/fresh-tvar)) params))
+        ctx' (reduce (fn [c [param tp]]
+                       (ctx/extend-binding c (:name param) tp))
                      ctx
-                     (map vector params param-tvars))
-        ;; Infer body
-        [body-type ctx''] (infer-node (:body method) ctx')
-        ;; Resolve tvars
-        resolved-params (mapv #(ctx/resolve-type ctx'' %) param-tvars)
+                     (map vector params param-types))
+        ;; Infer body, pushing expected return type
+        [body-type ctx''] (infer-node (:body method) ctx' expected-ret)
+        ;; Resolve tvars (no-op for concrete types from expected)
+        resolved-params (mapv #(ctx/resolve-type ctx'' %) param-types)
         resolved-ret (ctx/resolve-type ctx'' body-type)]
     [[:=> (into [:cat] resolved-params) resolved-ret]
      ctx'']))
 
-(defmethod infer-node :fn-method [node ctx]
+(defmethod infer-node :fn-method [node ctx expected]
   ;; Handled by :fn, but just in case
-  (infer-node (:body node) ctx))
+  (infer-node (:body node) ctx expected))
 
 ;; --- Definitions ---
 
-(defmethod infer-node :def [node ctx]
+(defmethod infer-node :def [node ctx _expected]
   (let [;; Check for inline annotation {:typura/sig [:=> ...]}
         var-meta (meta (:var node))
         typura-sig (:typura/sig var-meta)
-        ;; Infer body (even with annotation, for internal error checking)
+        ;; Push annotation as expected to :fn child for bidirectional inference
+        fn-expected (when (and typura-sig (t/fn-type? typura-sig))
+                      typura-sig)
         [init-type ctx'] (if (:init node)
-                           (infer-node (:init node) ctx)
+                           (infer-node (:init node) ctx fn-expected)
                            [:any ctx])
         var-sym (-> node :var symbol)
+        ;; Check return type mismatch when annotated
+        ctx'' (if (and fn-expected (t/fn-type? init-type))
+                (let [declared-ret (nth typura-sig 2)
+                      actual-ret (nth init-type 2)]
+                  (if (or (= actual-ret :any)
+                          (= actual-ret declared-ret)
+                          (sub/subtype? actual-ret declared-ret))
+                    ctx'
+                    (ctx/emit-diagnostic ctx'
+                      {:level :error
+                       :code :return-type-mismatch
+                       :message (str "Return type " actual-ret
+                                     " doesn't satisfy declared " declared-ret)
+                       :loc (check/node->loc node)
+                       :expected declared-ret
+                       :actual actual-ret})))
+                ctx')
         ;; Annotation overrides inferred type: store stub fn in globals
         global-val (if (and typura-sig (t/fn-type? typura-sig))
                      (stubs/sig typura-sig)
                      init-type)
-        ctx'' (ctx/extend-global ctx' var-sym global-val)]
-    [(or typura-sig init-type) ctx'']))
+        ctx''' (ctx/extend-global ctx'' var-sym global-val)]
+    [(or typura-sig init-type) ctx''']))
 
 ;; --- Other nodes (Phase 0 stubs) ---
 
-(defmethod infer-node :try [node ctx]
-  (infer-node (:body node) ctx))
+(defmethod infer-node :try [node ctx expected]
+  (infer-node (:body node) ctx expected))
 
-(defmethod infer-node :throw [node ctx]
+(defmethod infer-node :throw [_node ctx _expected]
   [:any ctx])
 
-(defmethod infer-node :new [node ctx]
+(defmethod infer-node :new [node ctx _expected]
   (let [[_ ctx'] (infer-args (:args node) ctx)
         cls (:class node)]
     [(or (when (class? cls) (t/class->type cls)) :any) ctx']))
 
-(defmethod infer-node :quote [node ctx]
+(defmethod infer-node :quote [_node ctx _expected]
   [:any ctx])
 
-(defmethod infer-node :set! [node ctx]
+(defmethod infer-node :set! [_node ctx _expected]
   [:any ctx])
 
-(defmethod infer-node :recur [node ctx]
+(defmethod infer-node :recur [_node ctx _expected]
   [:any ctx])
 
-(defmethod infer-node :map [node ctx]
+(defmethod infer-node :map [node ctx _expected]
   (let [[key-types ctx'] (infer-args (:keys node) ctx)
         [val-types ctx''] (infer-args (:vals node) ctx')
         key-nodes (:keys node)]
@@ -344,14 +405,14 @@
               v-union (simplify-union (into [:or] val-types))]
           [[:map-of k-union v-union] ctx''])))))
 
-(defmethod infer-node :vector [node ctx]
+(defmethod infer-node :vector [node ctx _expected]
   (let [[elem-types ctx'] (infer-args (:items node) ctx)]
     (if (empty? elem-types)
       [[:vector :any] ctx']
       (let [unified (simplify-union (into [:or] elem-types))]
         [[:vector unified] ctx']))))
 
-(defmethod infer-node :set [node ctx]
+(defmethod infer-node :set [node ctx _expected]
   (let [[elem-types ctx'] (infer-args (:items node) ctx)]
     (if (empty? elem-types)
       [[:set :any] ctx']
