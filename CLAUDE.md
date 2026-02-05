@@ -10,7 +10,7 @@ Typura is a static type analyzer for Clojure, inspired by OCaml's type inference
 - Infer argument and return types for every function by analyzing usage context
 - Gradual typing — type narrowing via predicates (`int?`, `string?`, etc.)
 - Hook/stub system for typing external functions (core, libraries)
-- Custom validation rules via SCI-evaluated meta-code
+- Custom validation rules via eval'd meta-code
 - Tags for enabling/disabling rule sets (dev vs CI)
 - Support JVM Clojure and ClojureScript (ClojureDart later)
 - Maximal inference — where type can theoretically be determined, determine it; otherwise `:any`
@@ -80,7 +80,7 @@ Malli schemas as the type language. Malli supports keywords, Java classes, and p
 ### Inference Strategy
 - **Java interop**: tools.analyzer.jvm provides Java types via reflection
 - **Core stubs**: manually written type definitions for clojure.core
-- **User stubs/hooks**: type definitions for third-party libraries via SCI
+- **User stubs/hooks**: type definitions for third-party libraries via eval
 - **Flow analysis**: type narrowing in conditional branches
 - **Constraint propagation**: bidirectional — if `+` expects Number, callers must provide Number
 - **Fallback**: unresolvable types become `:any` (no errors for unknowns)
@@ -92,7 +92,7 @@ These are handled directly by the analyzer (not via stubs):
 `atom` — also hardcoded (wraps inner type).
 
 ### Hook System
-SCI-evaluated Clojure files that modify the type context:
+Clojure files evaluated via `eval` that modify the type context:
 - Register function signatures for a library
 - Add custom lint/validation rules
 - Arbitrary context modifications
@@ -190,7 +190,7 @@ provides `:env` with `:line`/`:column` on each node — use these directly.
 
 - **malli** — type/schema representation
 - **clojure.tools.analyzer(.jvm)** — AST parsing (macros pre-expanded)
-- **babashka/sci** — sandboxed execution of hooks and meta-code
+- **tools.analyzer.jvm `analyze+eval`** — evaluates code during analysis (macros, type defs, hooks)
 
 ## Development Commands
 
@@ -288,27 +288,57 @@ Same mechanism for external stubs and inline annotations.
   - `typura.check` namespace extracted for shared type-checking utilities
 
 **Remaining:**
+- [ ] **Inferred function stubs** — `defn` without annotation produces a stub, not a static schema
+  - `:fn` handler returns a stub fn closed over the fn's AST (params + body)
+  - On each call site: binds params to concrete arg-types, infers body, returns result type
+  - Enables parametric polymorphism: `(defn id [x] x)` → `(id 42)` returns `:int`, `(id "a")` returns `:string`
+  - `:invoke` handler checks `fn?` for local bindings (not just `fn-type?`)
+  - `:def` handler skips body analysis when external stub already exists for the var
+  - Metadata on stub fn carries the "general" schema for display (LSP hover, diagnostics)
 - [ ] Helper function library (typura core API for stub authors)
-- [ ] **SCI integration** — sandbox for evaluating user-defined stub/hook files
-  - SCI dependency already declared (`org.babashka/sci 0.8.42`), not yet used in code
-  - Load `.typura/hooks/*.clj` files, evaluate resolver fns in SCI sandbox
-  - Expose typura API to SCI context (`sig`, `sig+guard`, `check/*` utilities)
+- [ ] **Hook/stub loading via eval** — load `.typura/hooks/*.clj` as regular Clojure files
+  - `require`/`load-file` in the analyzer's JVM — full access to classpath (Malli, user deps)
+  - `analyze+eval` already evals top-level forms — var values available via `deref`
   - User stubs override built-in stubs (user > built-in priority)
-- [ ] SCI-based hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
-- [ ] Stub file format (EDN with Malli schemas) — sugar over hooks
+- [ ] Hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
 - [ ] Expand core stubs to ~50 most-used functions
 - [ ] Schema constructors for generics
 - [ ] Tag-based rule filtering
+- [ ] **Deep Java interop** — fully leverage tools.analyzer.jvm reflection data
+  - `class->type` for unknown classes: return the class itself as type (e.g. `java.util.ArrayList`) instead of `:any`
+  - `:instance-call` — when `:validated? true`, check argument types against Java method signature from reflection
+  - `:static-call` — same, use reflection data as fallback when no stub exists
+  - `subtype?` for Java classes: use `.isAssignableFrom` for class hierarchy
+- [ ] **Mutable references** — `atom`, `ref`, `volatile!`, `agent` typed as `:any` by default
+  - `deref` / `@` returns `:any` unless annotated
+  - Explicit annotation: `(atom ^{:typura/type :int} 0)` → `deref` returns `:int`, `reset!` checks value type
+  - `swap!` checks that fn return type matches annotated type (when annotated)
+  - No automatic inner type tracking — mutation makes static tracking unsound
 
-### Phase 7 — ClojureScript Support
-- [ ] Abstract analyzer interface — decouple from tools.analyzer.jvm
-- [ ] tools.analyzer.js backend for CLJS
-- [ ] Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
-- [ ] Shared core logic, platform-specific stubs
-- [ ] Conditional reader tags for platform-aware stubs (`.cljc`)
+### Phase 7 — Literal Types & Tuples
+- [ ] **Literal (value) types** — `[:val x]` represents the type of a specific constant value
+  - `val->type` returns `[:val x]` instead of `:int` / `:keyword` / etc.
+  - `subtype?`: `[:val 0]` ⊂ `:int` ⊂ `:number`, `[:val :red]` ⊂ `:keyword`
+  - Unions of literals = enum: `[:or [:val :red] [:val :green] [:val :blue]]`
+  - `constrain` with `[:val 0]` against `:number` → ok (via subtype chain)
+  - `simplify-union`: collapse `[:or [:val 0] [:val 1] [:val 2]]` to `:int` if all same base type and count > threshold
+- [ ] **Tuple types** — `[:tuple T1 T2 ...]` for fixed-size heterogeneous vectors
+  - `subtype?`: `[:tuple :int :string]` ⊂ `[:vector [:or :int :string]]`
+  - `nth` on tuple with literal index returns positional type: `(nth [:tuple :int :string] [:val 0])` → `:int`
+  - Not inferred automatically from vector literals (vector stays `[:vector [:or ...]]`)
+  - Available via annotations and stubs
+- [ ] Update `simplify-union` — if union contains `:any`, collapse to `:any`
 
 ### Open Questions
 - Recursive types (trees, linked lists) — Malli `:ref` + inference? - yes
-- Constants as types (TypeScript-style literal types)? - yes
+- Constants as types (TypeScript-style literal types)? - yes, planned in Phase 7
 - How deep to go with cross-namespace constraint propagation? - unclear yet, likely unlimited
 - Schema merging / intersection types? - yes
+
+### Future TODO
+- **ClojureScript Support**
+  - Abstract analyzer interface — decouple from tools.analyzer.jvm
+  - tools.analyzer.js backend for CLJS
+  - Platform-specific type resolution (JVM reflection vs CLJS protocol metadata)
+  - Shared core logic, platform-specific stubs
+  - Conditional reader tags for platform-aware stubs (`.cljc`)
