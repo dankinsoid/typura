@@ -36,21 +36,26 @@ typura/
 ## Architecture
 
 ### Analysis Pipeline
-1. Parse source via `clojure.tools.analyzer(.jvm)` — macros already expanded
-2. Walk expanded AST, building **type context** (environment)
-3. Bidirectional type inference: synthesize bottom-up + check top-down
+1. Parse + eval source via `clojure.tools.analyzer.jvm/analyze+eval` — macros expanded, vars defined
+2. **Pass 1**: Deep AST walk collecting declarations (`:def`, `:deftype` nodes)
+   - Sub-pass 1a: protocols, annotations, multimethods, interface→protocol reverse mapping
+   - Sub-pass 1b: records with `:implements` resolved via reverse mapping
+3. **Pass 2**: Walk AST with pre-populated context — bidirectional type inference
 4. Propagate constraints through call graph
 5. Collect diagnostics where inferred type conflicts with expected type in context
 
 ### Type Context
 Immutable, scoped map enriched during AST traversal:
 ```clojure
-{:bindings  {symbol -> type}       ; local bindings (let, fn args)
- :globals   {var -> type}          ; def'd vars, registered stubs
- :protocols {protocol -> methods}  ; known protocol signatures
- :records   {record -> fields}     ; known record field types
- :rules     [rule-fn ...]          ; active custom rules
- :tags      #{:dev :ci ...}}       ; active tag set
+{:bindings            {symbol -> type}          ; local bindings (let, fn args)
+ :globals             {var-sym -> stub-fn|type}  ; def'd vars, registered stubs
+ :subst               {tvar-id -> type}          ; type variable substitutions
+ :diagnostics         [diag ...]                 ; accumulated diagnostics
+ :protocols           {proto-sym -> {:methods, :interface}}
+ :records             {record-sym -> {:fields, :map-type, :implements, :java-interfaces}}
+ :interface->protocol {Class -> proto-sym}       ; reverse mapping for defrecord
+ :rules               [rule-fn ...]              ; (planned) active custom rules
+ :tags                #{:dev :ci ...}}           ; (planned) active tag set
 ```
 
 ### Type Representation
@@ -65,6 +70,7 @@ representation, but the analyzer also handles Java types and internal inference 
 | Typed maps | `[:map [:id :string] [:name :string]]` | Yes |
 | Functions | `[:=> [:cat :int :int] :int]` | Yes |
 | Unions | `[:or :int :nil]` | Yes |
+| User-defined types | `'user/Bird`, `'user/Flyable` (qualified symbols) | No |
 | Java interfaces | `clojure.lang.IFn`, `clojure.lang.ILookup`, `clojure.lang.Indexed` | Yes |
 | Java classes | `java.lang.String`, `java.util.Map` (from reflection) | Yes |
 | Predicates | `int?`, `pos?`, `string?` | Yes |
@@ -261,8 +267,8 @@ where `expected` is `nil` (synthesis mode) or a type (checking mode).
 - [x] Typed collection literals: `[:vector T]`, `[:set T]`, `[:map [:k T] ...]`, `[:map-of K V]`
 - [x] Smart `get`/`nth` — resolves value types from structural maps and vectors
 - [x] Keyword invocation `(:key m)` via `:keyword-invoke` handler
-- [x] Capability types: `:cap/ifn`, `:cap/ilookup`, `:cap/indexed`, `:cap/seqable`, `:cap/associative`, `:cap/counted`
-- [x] Capability satisfaction in `subtype?` for vectors, maps, sets, keywords
+- [x] Java interface types: `IFn`, `ILookup`, `Indexed`, `Seqable`, `Associative`, `Counted`
+- [x] Interface satisfaction in `subtype?` for vectors, maps, sets, keywords
 - [x] Java interop: `class->type` mapping, improved `:instance-call`/`:new`/`:static-call`
 - [x] `RT/get`, `RT/nth` static call dispatch (used by macro-expanded destructuring)
 - [ ] **Destructuring analysis** — deferred to Phase 6c (see note below)
@@ -276,11 +282,30 @@ where `expected` is `nil` (synthesis mode) or a type (checking mode).
 > This is the motivating case for Phase 6's hook system: `PersistentArrayMap/createAsIfByAssoc`
 > needs to propagate the input map type through to its return type (generics).
 
-### Phase 4 — Protocols, Records, Multimethods
-- [ ] Protocol definitions → method signatures in context
-- [ ] Protocol/interface satisfaction checking in subtype layer
-- [ ] Record definitions → typed map schemas
-- [ ] Multimethod dispatch tracking and coverage warnings
+### Phase 4a — Symbolic Type Registry & Two-Pass Architecture ✅
+Focus: replace JVM Class objects with qualified symbols for user-defined types. Two-pass architecture
+(declaration collection + inference). Java interop types keep using Class objects.
+
+- [x] `user-type?` predicate — qualified symbols as type identifiers for records/protocols
+- [x] 3-arity `subtype?` with registry — symbolic subtype rules for protocol implementation
+- [x] Two-pass architecture: Pass 1 (`collect-declarations` — deep AST walk) → Pass 2 (`infer-node`)
+- [x] Interface→protocol reverse mapping — bridges eval'd AST Class objects to symbolic types
+- [x] Protocol definitions → method signatures in context
+- [x] Protocol/interface satisfaction checking in subtype layer
+- [x] Record definitions → typed map schemas with `:implements` tracking
+- [x] Multimethod basic support (variadic `any→any` stub)
+
+### Phase 4b — Implementation Validation
+- [ ] Check records implement all required protocol methods
+- [ ] Warn on missing method implementations
+
+### Phase 4c — `extend-protocol` / `extend-type`
+- [ ] Track runtime protocol extensions
+- [ ] Update `:implements` registry from `extend-protocol`/`extend-type` forms
+
+### Phase 4d — Forward References
+- [ ] `declare` support — forward-referenced vars resolved in Pass 2
+- [ ] Two-pass for regular `defn` — infer signatures in Pass 1, check bodies in Pass 2
 
 ### Phase 5 — Project-Level Analysis
 Focus: transition from single-expression analysis to whole-project analysis.
