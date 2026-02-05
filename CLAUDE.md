@@ -234,6 +234,33 @@ Focus: infrastructure, architecture, tests, fast feedback loop.
 - [x] **`:type-mismatch`** — argument type vs parameter type conflict detection (fixed & variadic params)
 - [ ] **`:unreachable-branch`** / **`:narrowed-misuse`** — dead code and post-narrowing misuse warnings (deferred)
 
+### Phase 2b — Bidirectional Inference & Constraint Accumulation
+Focus: make inference truly bidirectional. Currently `infer-node` is pure synthesis (bottom-up).
+Add expected-type propagation (top-down) and fix tvar constraint accumulation.
+
+**Core change:** `infer-node` signature becomes `[node ctx expected] → [type ctx']`
+where `expected` is `nil` (synthesis mode) or a type (checking mode).
+
+- [ ] **Expected-type parameter** — thread expected type through the AST walker
+  - `:do` — push expected into last expression (`:ret`)
+  - `:let` — push expected into body
+  - `:if` — push expected into both branches (enables earlier conflict detection)
+  - `:fn` — when expected is `[:=> [:cat P1 P2] R]`, bind params to `P1 P2` instead of fresh tvars,
+    push `R` into body. This is the key case: `(map (fn [x] ...) [1 2])` pushes `:int` into `x`
+  - `:invoke` — push param types as expected into arg expressions (currently done post-hoc via `constrain`)
+- [ ] **Constraint narrowing for tvars** — when tvar already bound, narrow instead of overwrite
+  - New constraint more specific (subtype of current): narrow
+  - Current more specific (subtype of new): keep, already satisfies
+  - Incompatible (neither is subtype): **conflict** → diagnostic
+  - Replaces current `(assoc-in ctx [:subst id] expected)` with intersection logic
+  - Example: `(+ x 1)` then `(bit-and x 3)` → `:number` narrowed to `:int` (not error)
+  - Example: `(+ x 1)` then `(count x)` → `:number` vs `:cap/counted` → conflict
+- [ ] **Return type checking** — verify function body against annotated return type
+  - `defn` with `{:typura/sig [:=> ...]}` → push declared return type as expected into body
+  - Emit `:return-type-mismatch` diagnostic on violation
+- [ ] **Multi-constraint tvars** — store constraint set per tvar instead of single type
+  - Resolve to intersection at use point, detect empty intersection as conflict
+
 ### Phase 3 — Clojure Core Abstractions & Interop ✅
 - [x] Typed collection literals: `[:vector T]`, `[:set T]`, `[:map [:k T] ...]`, `[:map-of K V]`
 - [x] Smart `get`/`nth` — resolves value types from structural maps and vectors
@@ -330,13 +357,52 @@ Focus: fully leverage tools.analyzer.jvm reflection data. Independent of 6b/6c.
 - [ ] `:static-call` — same, use reflection data as fallback when no stub exists
 - [ ] `subtype?` for Java classes: use `.isAssignableFrom` for class hierarchy
 
-### Phase 7 — Literal Types, Tuples & Advanced Type Features
+### Phase 6e — Malli Validation Narrowing
+Focus: recognize `m/validate` calls and narrow types from Malli schemas. Hardcoded integration
+that significantly improves analysis for projects already using Malli.
+
+- [ ] **Simple case** — `(m/validate User a)` narrows `a` to `User`'s schema type
+  - `m/validate` stub receives schema arg (resolved from var/literal) + value arg
+  - Returns `:boolean` with guard: narrows value arg to the schema's type
+  - Works in `if`/`when` branches like any other guard predicate
+  - Schema resolution: dereference var to get Malli schema, convert to typura type
+  - Covers `m/validate`, `malli.core/validate`, aliased requires
+- [ ] **Structural case** — `(m/validate User {:name a})` infers `a` is `:string` from `User`
+  - When the value arg is a literal map, match its structure against the schema
+  - Walk schema keys and map keys in parallel, bind leaf variables to expected types
+  - Example: `User = [:map [:name :string] [:age :int]]`, `{:name a}` → `a` narrowed to `:string`
+  - Only applies to literal maps with variable leaves (not arbitrary expressions)
+- [ ] **`m/coerce` support** — `(m/coerce User input)` returns `User`'s type (no guard, direct return type)
+
+### Phase 6f — Full Malli Schema Compatibility
+Focus: use Malli as the source of truth for schema operations. Currently typura treats schemas as
+opaque EDN vectors with hand-written pattern matching. Instead, use Malli's own API (`m/type`,
+`m/children`, `m/properties`, `m/walk`, `m/form`) for introspection. Only `subtype?` stays custom
+(Malli doesn't provide subtype checking).
+
+- [ ] **Schema normalization** — convert types to canonical Malli form via `m/schema` + `m/form`
+  - Handle map entry properties (`{:optional true}` etc.) via `m/children`
+  - Stop assuming entries are always 2-element vectors
+- [ ] **`subtype?` for all Malli schema types** — consult Malli docs for full list of schema types
+  - Current: only handles `:or`, `:=>`, `:map`, `:map-of`, `:vector`, `:set`, primitives
+  - Missing: `:enum`, `:maybe`, `:tuple`, `:and`, `:multi`, `:re`, `:sequential`,
+    `:qualified-keyword`, predicate schemas, etc. — enumerate from Malli docs during implementation
+- [ ] **Named schemas via Malli registry** — resolve schema keywords through registry lookup
+  - Unknown type keyword → check Malli registry before falling back to `:any`
+  - User project schemas available for type resolution
+- [ ] **Predicate schema hierarchy** — map Malli's predicate schemas (`pos-int?`, `nat-int?`, etc.)
+  to the primitive type hierarchy
+- [ ] **Use `m/validate` for concrete checks** — delegate literal-value-against-schema checks to Malli
+- [ ] Update `simplify-union` — if union contains `:any`, collapse to `:any`
+
+### Phase 7 — Literal Types & Advanced Type Features
 - [ ] **Literal (value) types** — `[:val x]` represents the type of a specific constant value
   - `val->type` returns `[:val x]` instead of `:int` / `:keyword` / etc.
   - `subtype?`: `[:val 0]` ⊂ `:int` ⊂ `:number`, `[:val :red]` ⊂ `:keyword`
   - Unions of literals = enum: `[:or [:val :red] [:val :green] [:val :blue]]`
   - `constrain` with `[:val 0]` against `:number` → ok (via subtype chain)
   - `simplify-union`: collapse `[:or [:val 0] [:val 1] [:val 2]]` to `:int` if all same base type and count > threshold
+  - `[:val x]` ⊂ `[:enum ... x ...]` (literal is member of enum)
 - [ ] **Tuple types** — `[:tuple T1 T2 ...]` for fixed-size heterogeneous vectors
   - `subtype?`: `[:tuple :int :string]` ⊂ `[:vector [:or :int :string]]`
   - `nth` on tuple with literal index returns positional type: `(nth [:tuple :int :string] [:val 0])` → `:int`
@@ -346,7 +412,6 @@ Focus: fully leverage tools.analyzer.jvm reflection data. Independent of 6b/6c.
 - [ ] **Intersection types** — schema merging (`[:and TypeA TypeB]`)
   - Useful for narrowing: guard + existing type = intersection
   - `subtype?`: `[:and A B]` ⊂ `A` and `[:and A B]` ⊂ `B`
-- [ ] Update `simplify-union` — if union contains `:any`, collapse to `:any`
 
 ### Phase 8 — LSP + CLI
 Depends on Phase 5 (project-level analysis).
