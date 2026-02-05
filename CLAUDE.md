@@ -54,19 +54,22 @@ Immutable, scoped map enriched during AST traversal:
 ```
 
 ### Type Representation
-Malli schemas as the type language. Malli supports keywords, Java classes, and predicates as schemas.
+Internal type system is a superset of Malli. Malli schemas are the primary user-facing
+representation, but the analyzer also handles Java types and internal inference artifacts.
 
-| Category | Example |
-|---|---|
-| Primitives | `:int`, `:string`, `:keyword`, `:boolean`, `:nil` |
-| Java classes | `java.lang.String`, `java.util.Map` (from reflection, not hardcoded) |
-| Predicates | `int?`, `pos?`, `string?` |
-| Collections | `[:vector :int]`, `[:set :keyword]`, `[:map-of :keyword :any]` |
-| Typed maps | `[:map [:id :string] [:name :string]]` |
-| Functions | `[:=> [:cat :int :int] :int]` |
-| Unions | `[:or :int :nil]` |
-| Capabilities | `IFn`, `ILookup`, `Indexed`, `Seqable`, `Associative`, `Counted` |
-| Schema constructors | `(Array :int)` → `[:vector :int]` (generics as functions) |
+| Category | Example | Malli? |
+|---|---|---|
+| Primitives | `:int`, `:string`, `:keyword`, `:boolean`, `:nil` | Yes |
+| Bottom type | `:nothing` (Never — no values inhabit this type) | Yes (registered) |
+| Collections | `[:vector :int]`, `[:set :keyword]`, `[:map-of :keyword :any]` | Yes |
+| Typed maps | `[:map [:id :string] [:name :string]]` | Yes |
+| Functions | `[:=> [:cat :int :int] :int]` | Yes |
+| Unions | `[:or :int :nil]` | Yes |
+| Java interfaces | `clojure.lang.IFn`, `clojure.lang.ILookup`, `clojure.lang.Indexed` | Yes |
+| Java classes | `java.lang.String`, `java.util.Map` (from reflection) | Yes |
+| Predicates | `int?`, `pos?`, `string?` | Yes |
+| Schema constructors | `(Array :int)` → `[:vector :int]` (generics as functions) | Yes |
+| Type variables | `[:tvar N]` — internal inference only, never in results | No |
 
 **Generics** are schema constructors — functions that take schemas and return schemas:
 ```clojure
@@ -339,7 +342,7 @@ Focus: plugin system for external stubs and custom rules. Can proceed after 6a.
   - `require`/`load-file` in the analyzer's JVM — full access to classpath (Malli, user deps)
   - `analyze+eval` already evals top-level forms — var values available via `deref`
   - User stubs override built-in stubs (user > built-in priority)
-- [ ] Hook API (`register-type!`, `register-rule!`, `ctx/narrow!`, `ctx/get-type`)
+- [ ] Hook API 
 - [ ] Tag-based rule filtering
 
 ### Phase 6d — Deep Java Interop

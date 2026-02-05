@@ -19,9 +19,9 @@
     (t/union-type? super)
     (some #(subtype? sub %) (rest super))
 
-    ;; keyword satisfies capabilities
-    (and (keyword? sub) (keyword? super) (= "cap" (namespace super)))
-    (contains? (get t/capability-satisfaction sub) super)
+    ;; keyword satisfies Java interface
+    (and (keyword? sub) (t/java-type? super))
+    (contains? (get t/interface-satisfaction sub) super)
 
     ;; primitive hierarchy (transitive)
     (and (keyword? sub) (keyword? super))
@@ -74,9 +74,9 @@
                      (subtype? (second entry) v-super)))
               (rest sub)))
 
-    ;; capability subtyping: collection type satisfies capability
-    (and (vector? sub) (keyword? super) (= "cap" (namespace super)))
+    ;; collection type satisfies Java interface
+    (and (vector? sub) (t/java-type? super))
     (let [tag (first sub)]
-      (contains? (get t/capability-satisfaction tag) super))
+      (contains? (get t/interface-satisfaction tag) super))
 
     :else false))

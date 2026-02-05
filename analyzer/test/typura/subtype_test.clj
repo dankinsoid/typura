@@ -1,6 +1,7 @@
 (ns typura.subtype-test
   (:require [clojure.test :refer [deftest is testing]]
-            [typura.subtype :as sut]))
+            [typura.subtype :as sut])
+  (:import [clojure.lang IFn ILookup Indexed Seqable Associative Counted]))
 
 (deftest identity-subtype
   (is (sut/subtype? :int :int))
@@ -89,21 +90,21 @@
     (is (not (sut/subtype? [:map [:a :int] [:b :string]]
                            [:map-of :keyword :int])))))
 
-(deftest capability-subtyping
-  (testing "vector satisfies capabilities"
-    (is (sut/subtype? [:vector :int] :cap/ifn))
-    (is (sut/subtype? [:vector :int] :cap/indexed))
-    (is (sut/subtype? [:vector :int] :cap/seqable))
-    (is (sut/subtype? [:vector :int] :cap/counted)))
-  (testing "map satisfies capabilities"
-    (is (sut/subtype? [:map [:a :int]] :cap/ilookup))
-    (is (sut/subtype? [:map [:a :int]] :cap/associative))
-    (is (not (sut/subtype? [:map [:a :int]] :cap/ifn))))
-  (testing "set satisfies capabilities"
-    (is (sut/subtype? [:set :int] :cap/ifn))
-    (is (sut/subtype? [:set :int] :cap/counted))
-    (is (not (sut/subtype? [:set :int] :cap/indexed))))
-  (testing "keyword satisfies capabilities"
-    (is (sut/subtype? :keyword :cap/ifn))
-    (is (sut/subtype? :keyword :cap/ilookup))
-    (is (not (sut/subtype? :keyword :cap/indexed)))))
+(deftest interface-subtyping
+  (testing "vector satisfies interfaces"
+    (is (sut/subtype? [:vector :int] IFn))
+    (is (sut/subtype? [:vector :int] Indexed))
+    (is (sut/subtype? [:vector :int] Seqable))
+    (is (sut/subtype? [:vector :int] Counted)))
+  (testing "map satisfies interfaces"
+    (is (sut/subtype? [:map [:a :int]] ILookup))
+    (is (sut/subtype? [:map [:a :int]] Associative))
+    (is (not (sut/subtype? [:map [:a :int]] IFn))))
+  (testing "set satisfies interfaces"
+    (is (sut/subtype? [:set :int] IFn))
+    (is (sut/subtype? [:set :int] Counted))
+    (is (not (sut/subtype? [:set :int] Indexed))))
+  (testing "keyword satisfies interfaces"
+    (is (sut/subtype? :keyword IFn))
+    (is (not (sut/subtype? :keyword ILookup)))
+    (is (not (sut/subtype? :keyword Indexed)))))

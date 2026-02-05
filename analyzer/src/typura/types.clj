@@ -1,4 +1,6 @@
-(ns typura.types)
+(ns typura.types
+  (:require [malli.core :as m])
+  (:import [clojure.lang IFn ILookup Indexed Seqable Associative Counted]))
 
 ;; Primitive type hierarchy: child -> set of direct parents
 (def primitive-parents
@@ -149,10 +151,24 @@
       (.isAssignableFrom Number cls)                :number
       :else                                         nil)))
 
-(def capability-satisfaction
-  "Maps collection type tags to the capabilities they satisfy."
-  {:vector  #{:cap/ifn :cap/ilookup :cap/indexed :cap/seqable :cap/associative :cap/counted}
-   :set     #{:cap/ifn :cap/counted :cap/seqable}
-   :map     #{:cap/ilookup :cap/seqable :cap/associative :cap/counted}
-   :map-of  #{:cap/ilookup :cap/seqable :cap/associative :cap/counted}
-   :keyword #{:cap/ifn :cap/ilookup}})
+(def interface-satisfaction
+  "Maps collection type tags to the Java interfaces they satisfy."
+  {:vector  #{IFn ILookup Indexed Seqable Associative Counted}
+   :set     #{IFn Counted Seqable}
+   :map     #{ILookup Seqable Associative Counted}
+   :map-of  #{ILookup Seqable Associative Counted}
+   :keyword #{IFn}})
+
+(defn java-type?
+  "Java class/interface used as type."
+  [t]
+  (instance? Class t))
+
+(def nothing-schema
+  "Bottom type (Never) — no values inhabit this type."
+  (m/-simple-schema {:type :nothing
+                     :pred (constantly false)}))
+
+(def registry
+  "Typura's custom Malli registry with :nothing."
+  (merge (m/default-schemas) {:nothing nothing-schema}))
