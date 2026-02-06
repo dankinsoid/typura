@@ -205,6 +205,17 @@
   (testing "unknown key returns :any"
     (is (= :any (:type (sut/analyze-form '(:z {:a 1})))))))
 
+(deftest ifn-invoke-inference
+  (testing "map as IFn: (m :key)"
+    (is (= :int
+           (:type (sut/analyze-form '(let [m {:a 1 :b "hi"}] (m :a)))))))
+  (testing "vector as IFn: (v idx)"
+    (is (= :int
+           (:type (sut/analyze-form '(let [v [1 2 3]] (v 0)))))))
+  (testing "set as IFn: (s val) — returns element or nil"
+    (is (= [:or :int :nil]
+           (:type (sut/analyze-form '(let [s #{1 2 3}] (s 1))))))))
+
 (deftest get-inference
   (testing "get on keyword map with const key"
     (is (= :int (:type (sut/analyze-form '(get {:a 1 :b "hi"} :a))))))

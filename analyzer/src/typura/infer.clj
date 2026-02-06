@@ -104,7 +104,7 @@
              ;; Global is a type
              global global
              ;; Fall back to core stubs
-             :else (when-let [sf (stubs/lookup-stub var-sym)]
+             :else (when-let [sf (stubs/lookup-var var-sym)]
                      (or (stubs/stub-schema sf) :any)))]
     [(or tp :any) ctx]))
 
@@ -252,7 +252,7 @@
                   (let [g (ctx/lookup-global ctx var-sym)]
                     (if (fn? g)
                       g
-                      (stubs/lookup-stub var-sym))))
+                      (stubs/lookup-var var-sym))))
         ;; Fall back to fn type from globals or local binding
         fn-type (when-not stub-fn
                   (case (:op fn-node)
@@ -261,6 +261,11 @@
                     :local (let [t (ctx/lookup-binding ctx (:name fn-node))]
                              (when (and t (t/fn-type? t)) t))
                     nil))
+        ;; For local bindings with known IFn types (map, vector, set), look up IFn stub
+        local-type (when (and (not stub-fn) (not fn-type) (= :local (:op fn-node)))
+                     (ctx/lookup-binding ctx (:name fn-node)))
+        ifn-stub (when local-type
+                   (stubs/lookup-ifn-for-type local-type (count (:args node))))
         ;; Extract expected arg types for bidirectional pushdown
         schema (or (when stub-fn (stubs/stub-schema stub-fn))
                    (when (t/fn-type? fn-type) fn-type))
@@ -273,7 +278,16 @@
       stub-fn (stub-fn arg-types (:args node) ctx')
       (and fn-type (t/fn-type? fn-type))
       (check/apply-fn-type ctx' fn-type arg-types (:args node))
-      :else [:any ctx'])))
+      ;; IFn stub for known types (map, vector, set)
+      ifn-stub (ifn-stub (into [local-type] arg-types)
+                         (into [fn-node] (:args node))
+                         ctx')
+      ;; Unknown target — constrain to IFn if it's a tvar
+      :else (let [ctx'' (if (and local-type (t/tvar? local-type))
+                          (or (ctx/constrain ctx' local-type clojure.lang.IFn)
+                              ctx')
+                          ctx')]
+              [:any ctx'']))))
 
 (defmethod infer-node :static-call [node ctx _expected]
   (let [stub-fn (stubs/lookup-static (:class node) (:method node))
@@ -290,11 +304,13 @@
 (defmethod infer-node :keyword-invoke [node ctx _expected]
   (let [kw-node (:keyword node)
         target-node (:target node)
-        [target-type ctx'] (infer-node target-node ctx nil)
-        kw (:val kw-node)]
-    (if-let [vt (check/map-get-type target-type kw ctx')]
-      [vt ctx']
-      [:any ctx'])))
+        [kw-type ctx'] (infer-node kw-node ctx nil)
+        [target-type ctx''] (infer-node target-node ctx' nil)
+        ;; Look up IFn stub for Keyword (arity 1)
+        stub-fn (stubs/lookup-ifn "clojure.lang.Keyword" 1)]
+    (if stub-fn
+      (stub-fn [kw-type target-type] [kw-node target-node] ctx'')
+      [:any ctx''])))
 
 (defmethod infer-node :instance-call [node ctx _expected]
   (let [[_ ctx'] (infer-args (:args node) ctx)
@@ -436,7 +452,7 @@
         stub-fn (when var-sym
                   (or (let [g (ctx/lookup-global ctx var-sym)]
                         (when (fn? g) g))
-                      (stubs/lookup-stub var-sym)
+                      (stubs/lookup-var var-sym)
                       (when-let [proto-var (:protocol (meta the-var))]
                         (let [proto-name (var->sym proto-var)
                               arity (count (first (:arglists (meta the-var))))

@@ -428,6 +428,11 @@ opaque EDN vectors with hand-written pattern matching. Instead, use Malli's own 
   - `constrain` with `[:val 0]` against `:number` → ok (via subtype chain)
   - `simplify-union`: collapse `[:or [:val 0] [:val 1] [:val 2]]` to `:int` if all same base type and count > threshold
   - `[:val x]` ⊂ `[:enum ... x ...]` (literal is member of enum)
+- [ ] **Constant propagation** — track literal values through bindings for precise lookups
+  - `(let [k :x] (get m k))` — `k` has type `[:val :x]`, resolver extracts `:x` for map lookup
+  - `(let [a 4 b a] ...)` — `b` inherits `[:val 4]` from `a`
+  - Enables typed map validation: `[:map [:x :number]]` + `(k m)` where `k = :x` → `:number`
+  - Current limitation: `resolve-keyword-invoke` reads `:val` from AST node, not from binding type
 - [ ] **Tuple types** — `[:tuple T1 T2 ...]` for fixed-size heterogeneous vectors
   - `subtype?`: `[:tuple :int :string]` ⊂ `[:vector [:or :int :string]]`
   - `nth` on tuple with literal index returns positional type: `(nth [:tuple :int :string] [:val 0])` → `:int`
